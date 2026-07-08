@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>棋析</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="loadingOverlay" class="loading-overlay" aria-live="polite">
+      <div class="loading-box">
+        <div id="loadingText">正在加载上一次的存档</div>
+        <div class="progress-track"><div id="loadingBar" class="progress-bar"></div></div>
+      </div>
+    </div>
+
+    <div id="languageGate" class="language-gate" hidden>
+      <div class="language-panel">
+        <div class="language-title">棋析</div>
+        <div class="language-actions">
+          <button type="button" data-lang="zh-Hans">简体中文</button>
+          <button type="button" data-lang="zh-Hant">繁體中文</button>
+          <button type="button" data-lang="en">English</button>
+        </div>
+        <button id="skipIcloudButton" type="button" class="ghost-command">跳过 iCloud 同步</button>
+      </div>
+    </div>
+
+    <main class="qixi-shell">
+      <div class="center-divider" aria-hidden="true"></div>
+
+      <section class="left-pane" aria-label="analysis overview">
+        <canvas id="chartCanvas" class="chart-canvas" width="760" height="260"></canvas>
+
+        <section class="tree-panel">
+          <svg id="treeSvg" class="tree-svg" viewBox="0 0 760 360" role="img" aria-label="variation tree"></svg>
+          <div id="treeScrollX" class="tree-scroll-x" hidden></div>
+          <div id="treeScrollY" class="tree-scroll-y" hidden></div>
+        </section>
+
+        <nav class="mode-switch" aria-label="mode">
+          <button type="button" data-mode="fast"><span class="mode-icon">⚡</span><span>快速模式</span></button>
+          <button type="button" data-mode="expert" class="is-selected"><span class="mode-icon">◆</span><span>专家模式</span></button>
+          <button type="button" data-mode="recognition"><span class="mode-icon">▣</span><span>识图模式</span></button>
+        </nav>
+
+        <nav class="engine-switch" aria-label="engine">
+          <button type="button" data-engine="none" class="is-selected"><img src="/assets/icons/qixi-engine-off.svg" alt=""><span>无引擎</span></button>
+          <button type="button" data-engine="b6"><img src="/assets/icons/qixi-engine-b6-light.svg" alt=""><span>b6</span></button>
+          <button type="button" data-engine="b18nbt"><img src="/assets/icons/qixi-engine-b18-balanced.svg" alt=""><span>b18nbt</span></button>
+          <button type="button" data-engine="b28nbt"><img src="/assets/icons/qixi-engine-b28-strong.svg" alt=""><span>b28nbt</span></button>
+        </nav>
+
+        <section class="settings-row">
+          <label class="setting-box">
+            <span>贴目</span>
+            <input id="komiInput" type="number" step="0.5" value="7.5">
+          </label>
+          <label class="setting-box">
+            <span>宽根噪声</span>
+            <input id="rootNoiseInput" type="number" step="0.01" value="0.00">
+          </label>
+        </section>
+
+        <section class="utility-row">
+          <button type="button"><img src="/assets/icons/qixi-camera-recognition.svg" alt=""><span>拍照识别盘面</span></button>
+          <button type="button"><img src="/assets/icons/qixi-import.svg" alt=""><span>导入</span></button>
+          <button type="button"><img src="/assets/icons/qixi-icloud-sync.svg" alt=""><span>配置同步</span></button>
+        </section>
+      </section>
+
+      <section class="right-pane" aria-label="board analysis">
+        <div class="board-header">
+          <div>
+            <div class="brand">棋析</div>
+            <div id="engineStatus" class="status">none · ready</div>
+          </div>
+          <div class="hermes-chip">
+            <img src="/assets/icons/hermes-status-running.svg" alt="">
+            <span>Gateway</span>
+          </div>
+        </div>
+
+        <div class="board-frame">
+          <div id="board" class="board" role="application" aria-label="19 by 19 Go board">
+            <div id="territoryLayer" class="territory-layer" aria-hidden="true"></div>
+            <div id="candidateLayer" class="candidate-layer" aria-hidden="true"></div>
+            <div id="stoneLayer" class="stone-layer" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <div class="board-controls" aria-label="board controls">
+          <button id="passButton" class="text-command" type="button"><img src="/assets/icons/qixi-pass-move.svg" alt=""><span>停一手</span></button>
+          <span class="control-gap"></span>
+          <button class="icon-command" type="button" data-step="-5" title="Back five"><img src="/assets/icons/qixi-back-five-exact.svg" alt=""></button>
+          <button class="icon-command" type="button" data-step="-1" title="Back one"><img src="/assets/icons/qixi-back-one.svg" alt=""></button>
+          <button class="icon-command" type="button" data-step="1" title="Forward one"><img src="/assets/icons/qixi-forward-one.svg" alt=""></button>
+          <button class="icon-command" type="button" data-step="5" title="Forward five"><img src="/assets/icons/qixi-forward-five-exact.svg" alt=""></button>
+          <span class="control-gap"></span>
+          <button id="territoryButton" class="icon-command" type="button" title="Territory"><img src="/assets/icons/qixi-territory-heatmap.svg" alt=""></button>
+          <button id="autoReplayButton" class="text-command" type="button"><img src="/assets/icons/qixi-auto-replay.svg" alt=""><span>自动打谱</span></button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

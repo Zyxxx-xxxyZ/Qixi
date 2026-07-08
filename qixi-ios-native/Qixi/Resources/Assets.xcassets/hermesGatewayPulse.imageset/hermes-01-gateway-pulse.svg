@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">Hermes Gateway pulse icon</title>
+  <desc id="desc">Left-side Gateway waveform icon from Hermes agent UI, reconstructed as vector.</desc>
+
+  <rect width="120" height="120" rx="24" fill="#FFFFFF"/>
+  <path d="M24 61h16l7-28 14 55 9-31h26" fill="none" stroke="#2152F4" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="100" cy="60" r="7" fill="#2152F4"/>
+</svg>

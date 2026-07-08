@@ -1,0 +1,283 @@
+{
+  "schemaVersion": 2,
+  "cases": [
+    {
+      "id": "same-stones-order-a",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 },
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 }
+      ]
+    },
+    {
+      "id": "same-stones-order-a-copy",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 },
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 }
+      ]
+    },
+    {
+      "id": "same-stones-order-b",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 },
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 }
+      ]
+    },
+    {
+      "id": "same-stones-order-a-b18",
+      "engine": "b18nbt",
+      "backendEngine": "katago-metal-mux:b18nbt",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 },
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 }
+      ]
+    },
+    {
+      "id": "same-stones-order-a-komi65",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 6.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 },
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 }
+      ]
+    },
+    {
+      "id": "same-stones-order-a-rootnoise004",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.04,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 },
+        { "color": "W", "x": 15, "y": 15 },
+        { "color": "B", "x": 16, "y": 3 },
+        { "color": "W", "x": 2, "y": 15 }
+      ]
+    },
+    {
+      "id": "black-pass-white-corner",
+      "engine": "none",
+      "backendEngine": "none",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "pass": true },
+        { "color": "W", "x": 3, "y": 3 }
+      ]
+    },
+    {
+      "id": "white-corner-only",
+      "engine": "none",
+      "backendEngine": "none",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "W", "x": 3, "y": 3 }
+      ]
+    },
+    {
+      "id": "recapture-history",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 1, "y": 0 },
+        { "color": "W", "x": 0, "y": 0 },
+        { "color": "B", "x": 0, "y": 1 },
+        { "color": "W", "pass": true },
+        { "color": "B", "x": 0, "y": 0 }
+      ]
+    },
+    {
+      "id": "single-occupancy-history",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 1, "y": 0 },
+        { "color": "W", "pass": true },
+        { "color": "B", "x": 0, "y": 1 },
+        { "color": "W", "pass": true },
+        { "color": "B", "x": 0, "y": 0 }
+      ]
+    },
+    {
+      "id": "ko-after-capture",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 0, "y": 1 },
+        { "color": "B", "x": 1, "y": 0 },
+        { "color": "B", "x": 2, "y": 1 },
+        { "color": "W", "x": 1, "y": 1 },
+        { "color": "W", "x": 0, "y": 2 },
+        { "color": "W", "x": 2, "y": 2 },
+        { "color": "W", "x": 1, "y": 3 },
+        { "color": "B", "x": 1, "y": 2 }
+      ]
+    },
+    {
+      "id": "ko-after-capture-two-passes",
+      "engine": "b6",
+      "backendEngine": "katago-metal-mux:b6",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 0, "y": 1 },
+        { "color": "B", "x": 1, "y": 0 },
+        { "color": "B", "x": 2, "y": 1 },
+        { "color": "W", "x": 1, "y": 1 },
+        { "color": "W", "x": 0, "y": 2 },
+        { "color": "W", "x": 2, "y": 2 },
+        { "color": "W", "x": 1, "y": 3 },
+        { "color": "B", "x": 1, "y": 2 },
+        { "color": "W", "pass": true },
+        { "color": "B", "pass": true }
+      ]
+    },
+    {
+      "id": "none-empty",
+      "engine": "none",
+      "backendEngine": "none",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": []
+    },
+    {
+      "id": "none-black-move",
+      "engine": "none",
+      "backendEngine": "none",
+      "rules": "Chinese",
+      "komi": 7.5,
+      "rootNoise": 0.0,
+      "moves": [
+        { "color": "B", "x": 3, "y": 3 }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "identical-request",
+      "left": "same-stones-order-a",
+      "right": "same-stones-order-a-copy",
+      "equal": true,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "Identical engine, rules, settings, and ordered history must share one semantic cache key."
+    },
+    {
+      "id": "same-stones-different-order",
+      "left": "same-stones-order-a",
+      "right": "same-stones-order-b",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "The visible stones match, but previous move order differs and must not share analysis."
+    },
+    {
+      "id": "engine-switch",
+      "left": "same-stones-order-a",
+      "right": "same-stones-order-a-b18",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "Different engines must not share cached analysis."
+    },
+    {
+      "id": "komi-change",
+      "left": "same-stones-order-a",
+      "right": "same-stones-order-a-komi65",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "Different komi changes the semantic analysis position."
+    },
+    {
+      "id": "root-noise-change",
+      "left": "same-stones-order-a",
+      "right": "same-stones-order-a-rootnoise004",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "Wide-root-noise settings must partition cached analysis."
+    },
+    {
+      "id": "pass-history",
+      "left": "black-pass-white-corner",
+      "right": "white-corner-only",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "A pass is history and must not collapse to the same visible stones."
+    },
+    {
+      "id": "captured-coordinate-reuse",
+      "left": "recapture-history",
+      "right": "single-occupancy-history",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "Repeated coordinates after capture must remain visible in ordered history."
+    },
+    {
+      "id": "ko-history-after-passes",
+      "left": "ko-after-capture",
+      "right": "ko-after-capture-two-passes",
+      "equal": false,
+      "sameVisibleStones": true,
+      "sameNextPlayer": true,
+      "reason": "The visible stones and next player match, but intervening pass history changes ko context and must not share analysis."
+    },
+    {
+      "id": "empty-vs-first-move",
+      "left": "none-empty",
+      "right": "none-black-move",
+      "equal": false,
+      "sameVisibleStones": false,
+      "sameNextPlayer": false,
+      "reason": "No-engine cache identity still partitions by ordered history."
+    }
+  ]
+}

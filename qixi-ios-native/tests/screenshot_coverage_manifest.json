@@ -1,0 +1,748 @@
+{
+  "version": 1,
+  "languages": [
+    "zh-Hans",
+    "zh-Hant",
+    "en"
+  ],
+  "matrices": [
+    {
+      "id": "ipad-main",
+      "description": "Main landscape iPad analysis surface in every supported language.",
+      "scripts": [
+        "scripts/screenshot-all-locales.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-engine-selection",
+      "description": "Main landscape iPad analysis surface with each non-empty engine selected in every supported language.",
+      "scripts": [
+        "scripts/screenshot-engine-selection.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "engine": [
+          "b6",
+          "b18nbt",
+          "b28nbt"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-engine-{engine}-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_AUTOMATION_SELECT_ENGINE": "{engine}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-onboarding",
+      "description": "First-launch language and iCloud onboarding in every supported language.",
+      "scripts": [
+        "scripts/screenshot-onboarding-all-locales.sh",
+        "scripts/screenshot-onboarding-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_onboarding_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-onboarding-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_SKIP_ONBOARDING": "0"
+      }
+    },
+    {
+      "id": "ipad-hermes-status",
+      "description": "Hermes engine status badge for ready/loading/offline states in every supported language.",
+      "scripts": [
+        "scripts/screenshot-hermes-statuses.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_hermes_status_screenshot.py",
+      "inspectorArguments": [
+        "{status}"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "status": [
+          "ready",
+          "loading",
+          "offline"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-hermes-{status}-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_HERMES_STATUS": "{status}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-engine-error",
+      "description": "Visible native engine failure reasons in every supported language.",
+      "scripts": [
+        "scripts/screenshot-hermes-statuses.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_engine_error_screenshot.py",
+      "inspectorArguments": [
+        "{engineError}"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "engineError": [
+          "library-not-linked",
+          "model-missing",
+          "insufficient-memory",
+          "local-network-denied"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-engine-error-{engineError}-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ENGINE_ERROR": "{engineError}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-real-device-evidence-negative",
+      "description": "Simulator must visibly render the real-device evidence fixture while rejecting release-valid evidence export with QIXI_DEVICE_BACKEND_URL set.",
+      "scripts": [
+        "scripts/real-device-evidence-negative-smoke-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {},
+      "screenshot": "artifacts/screenshots/latest-ipad-real-device-evidence-negative.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "en",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_ANALYSIS_RUNTIME": "nativeInProcess",
+        "QIXI_ANALYSIS_FIXTURE": "real-device-evidence",
+        "QIXI_EXPORT_REAL_DEVICE_EVIDENCE_ON_ANALYSIS": "1",
+        "QIXI_DEVICE_BACKEND_URL": "http://192.168.1.23:8765",
+        "QIXI_BACKEND_URL": "",
+        "QIXI_REAL_DEVICE_RUN_ID": "00000000-0000-4000-8000-000000000001",
+        "QIXI_SEED_REAL_DEVICE_EVIDENCE_ARTIFACTS": "1"
+      }
+    },
+    {
+      "id": "ipad-real-device-evidence-negative-legacy",
+      "description": "Simulator must visibly render the real-device evidence fixture while rejecting release-valid evidence export with legacy QIXI_BACKEND_URL set.",
+      "scripts": [
+        "scripts/real-device-evidence-negative-smoke-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {},
+      "screenshot": "artifacts/screenshots/latest-ipad-real-device-evidence-negative-legacy.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "en",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_ANALYSIS_RUNTIME": "nativeInProcess",
+        "QIXI_ANALYSIS_FIXTURE": "real-device-evidence",
+        "QIXI_EXPORT_REAL_DEVICE_EVIDENCE_ON_ANALYSIS": "1",
+        "QIXI_DEVICE_BACKEND_URL": "",
+        "QIXI_BACKEND_URL": "http://192.168.1.23:8765",
+        "QIXI_REAL_DEVICE_RUN_ID": "00000000-0000-4000-8000-000000000002",
+        "QIXI_SEED_REAL_DEVICE_EVIDENCE_ARTIFACTS": "1"
+      }
+    },
+    {
+      "id": "ipad-persistence-smoke",
+      "description": "Lifecycle autosave and native engine tombstone smoke screenshot for the installed iPad simulator app.",
+      "scripts": [
+        "scripts/persistence-smoke-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {},
+      "screenshot": "artifacts/screenshots/latest-ipad-persistence.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "en",
+        "QIXI_ANALYSIS_RUNTIME": "nativeInProcess",
+        "QIXI_LIFECYCLE_TOMBSTONE_ON_LAUNCH": "automation.lifecycle",
+        "QIXI_SEED_NATIVE_ENGINE_TOMBSTONE": "1"
+      }
+    },
+    {
+      "id": "ipad-performance-smoke",
+      "description": "Simulator launch and RSS smoke screenshot used by the performance artifact check.",
+      "scripts": [
+        "scripts/performance-smoke-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {},
+      "screenshot": "artifacts/screenshots/latest-ipad-performance.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "en",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-board-overlays",
+      "description": "Candidate move circles and MCTS territory markers in every supported language.",
+      "scripts": [
+        "scripts/screenshot-board-overlays.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_overlay_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-board-overlays-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-overlays",
+        "QIXI_SHOW_TERRITORY": "1",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-board-capture-replay",
+      "description": "Captured stones are removed from the rendered board in every supported language.",
+      "scripts": [
+        "scripts/screenshot-board-capture-replay.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_capture_replay_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-board-capture-replay-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-capture-replay",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-board-recognition-preview",
+      "description": "Photo recognition visible-stone preview rings in every supported language without changing ordered history.",
+      "scripts": [
+        "scripts/screenshot-board-recognition-preview.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_recognition_preview_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-board-recognition-preview-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-recognition-preview",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-utility-sheet",
+      "description": "Photo scan and SGF import sheets in every supported language.",
+      "scripts": [
+        "scripts/screenshot-utility-sheets.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "sheet": [
+          "camera",
+          "import"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-{sheet}-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "{sheet}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-sync-sheet-disabled",
+      "description": "iCloud sync sheet before sync is enabled in every supported language.",
+      "scripts": [
+        "scripts/screenshot-utility-sheets.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "disabled"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-sync-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "0",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-sync-sheet-enabled",
+      "description": "iCloud sync sheet after sync is enabled in every supported language.",
+      "scripts": [
+        "scripts/screenshot-utility-sheets.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "enabled"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-sync-enabled-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-sync-sheet-synced",
+      "description": "iCloud sync sheet after a successful sync in every supported language.",
+      "scripts": [
+        "scripts/screenshot-utility-sheets.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "synced"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-sync-synced-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SYNC_STATUS": "synced",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "ipad-sync-sheet-attention",
+      "description": "iCloud sync sheet failure and conflict states in every supported language.",
+      "scripts": [
+        "scripts/screenshot-utility-sheets.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "{syncStatus}"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "syncStatus": [
+          "error",
+          "conflict"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-ipad-sync-{syncStatus}-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SYNC_STATUS": "{syncStatus}",
+        "QIXI_SKIP_ONBOARDING": "1"
+      }
+    },
+    {
+      "id": "iphone-main",
+      "description": "Main landscape iPhone analysis surface in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-all-locales.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-engine-selection",
+      "description": "Main landscape iPhone analysis surface with each non-empty engine selected in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-engine-selection.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "engine": [
+          "b6",
+          "b18nbt",
+          "b28nbt"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-engine-{engine}-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_AUTOMATION_SELECT_ENGINE": "{engine}",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-onboarding",
+      "description": "First-launch iPhone language and iCloud onboarding in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-onboarding-all-locales.sh",
+        "scripts/screenshot-iphone-onboarding-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_onboarding_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-onboarding-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_SKIP_ONBOARDING": "0",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-engine-error",
+      "description": "Visible native engine failure reasons on landscape iPhone in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-engine-errors.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_engine_error_screenshot.py",
+      "inspectorArguments": [
+        "{engineError}"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "engineError": [
+          "library-not-linked",
+          "model-missing",
+          "insufficient-memory",
+          "local-network-denied"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-engine-error-{engineError}-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ENGINE_ERROR": "{engineError}",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-board-recognition-preview",
+      "description": "Photo recognition visible-stone preview rings on landscape iPhone in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-board-recognition-preview.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_recognition_preview_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-board-recognition-preview-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-recognition-preview",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-board-overlays",
+      "description": "Candidate move circles and MCTS territory markers on landscape iPhone in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-board-overlays.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_overlay_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-board-overlays-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-overlays",
+        "QIXI_SHOW_TERRITORY": "1",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-board-capture-replay",
+      "description": "Captured stones are removed from the rendered board on landscape iPhone in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-board-capture-replay.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_board_capture_replay_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-board-capture-replay-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_ANALYSIS_FIXTURE": "board-capture-replay",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-utility-sheet",
+      "description": "Photo scan and SGF import sheets on landscape iPhone in every supported language.",
+      "scripts": [
+        "scripts/screenshot-iphone-utility-sheets.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "sheet": [
+          "camera",
+          "import"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-{sheet}-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "{sheet}",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-sync-sheet-disabled",
+      "description": "iCloud sync sheet before sync is enabled on landscape iPhone.",
+      "scripts": [
+        "scripts/screenshot-iphone-utility-sheets.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "disabled"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-sync-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "0",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-sync-sheet-enabled",
+      "description": "iCloud sync sheet after sync is enabled on landscape iPhone.",
+      "scripts": [
+        "scripts/screenshot-iphone-utility-sheets.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "enabled"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-sync-enabled-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-sync-sheet-synced",
+      "description": "iCloud sync sheet after a successful sync on landscape iPhone.",
+      "scripts": [
+        "scripts/screenshot-iphone-utility-sheets.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "synced"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-sync-synced-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SYNC_STATUS": "synced",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    },
+    {
+      "id": "iphone-sync-sheet-attention",
+      "description": "iCloud sync sheet failure and conflict states on landscape iPhone.",
+      "scripts": [
+        "scripts/screenshot-iphone-utility-sheets.sh",
+        "scripts/screenshot-iphone-sim.sh",
+        "scripts/screenshot-sim.sh"
+      ],
+      "inspector": "tests/inspect_utility_sheet_screenshot.py",
+      "inspectorArguments": [
+        "{syncStatus}"
+      ],
+      "dimensions": {
+        "language": [
+          "zh-Hans",
+          "zh-Hant",
+          "en"
+        ],
+        "syncStatus": [
+          "error",
+          "conflict"
+        ]
+      },
+      "screenshot": "artifacts/screenshots/latest-iphone-sync-{syncStatus}-sheet-{language}.png",
+      "environment": {
+        "QIXI_APP_LANGUAGE": "{language}",
+        "QIXI_OPEN_UTILITY_SHEET": "sync",
+        "QIXI_ICLOUD_SYNC_ENABLED": "1",
+        "QIXI_SYNC_STATUS": "{syncStatus}",
+        "QIXI_SKIP_ONBOARDING": "1",
+        "QIXI_SCREENSHOT_AUTO_ROTATE": "1"
+      }
+    }
+  ],
+  "requiredStateCount": 127
+}

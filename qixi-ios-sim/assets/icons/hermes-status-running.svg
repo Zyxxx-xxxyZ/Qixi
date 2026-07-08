@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">Hermes status running</title>
+  <desc id="desc">Actively running, same blue pulse family</desc>
+
+  <rect width="96" height="96" rx="22" fill="#FFFFFF"/>
+  <circle cx="48" cy="48" r="18" fill="#2152F4"/>
+  <circle cx="48" cy="48" r="28" fill="#2152F4" opacity=".12"/>
+</svg>

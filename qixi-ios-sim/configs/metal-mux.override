@@ -1,0 +1,1 @@
+numNNServerThreadsPerModel=4, metalDeviceToUseThread0=0, metalDeviceToUseThread1=0, metalDeviceToUseThread2=100, metalDeviceToUseThread3=100, metalUseFP16=true, nnMaxBatchSize=16

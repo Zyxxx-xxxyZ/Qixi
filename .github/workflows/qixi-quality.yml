@@ -1,0 +1,229 @@
+name: Qixi Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_screenshots:
+        description: Run the iPad/iPhone simulator screenshot and persistence smoke gates
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      run_real_models:
+        description: Run real KataGo Metal mux model integration gates
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      run_ios_katago_cmake:
+        description: Run iOS KataGo CMake simulator and device static-library gates
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      run_native_release_sim:
+        description: Run linked NativeRelease simulator smoke gate
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      run_device_bridge_smoke:
+        description: Run physical-device bridge smoke on a configured Mac runner
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      device_bridge_runner:
+        description: JSON runner labels for physical-device bridge smoke
+        required: false
+        default: '["self-hosted","macOS","qixi-device"]'
+        type: string
+
+jobs:
+  default-gate:
+    name: Default Quality Gate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Run default quality gate
+        run: scripts/qixi-quality-gate.sh
+
+  screenshot-gate:
+    name: Screenshot Gate
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_screenshots == 'true')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Classify changed surfaces
+        id: classify
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/qixi_changed_surface_gate.py --github-output "$GITHUB_OUTPUT"
+      - name: Run screenshot quality gate
+        if: (github.event_name == 'workflow_dispatch' && inputs.run_screenshots == 'true') || steps.classify.outputs.requires_screenshots == 'true'
+        env:
+          QIXI_RUN_SCREENSHOTS: "1"
+        run: scripts/qixi-quality-gate.sh
+      - name: Record screenshot gate skip
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_screenshots != 'true'
+        run: echo "Screenshot gate not required by changed-file classification."
+
+  real-model-gate:
+    name: Real Model Gate
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_real_models == 'true')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Classify changed surfaces
+        id: classify
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/qixi_changed_surface_gate.py --github-output "$GITHUB_OUTPUT"
+      - name: Run real model quality gate
+        if: (github.event_name == 'workflow_dispatch' && inputs.run_real_models == 'true') || steps.classify.outputs.requires_real_models == 'true'
+        env:
+          QIXI_RUN_REAL_MODELS: "1"
+        run: scripts/qixi-quality-gate.sh
+      - name: Record real model gate skip
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_real_models != 'true'
+        run: echo "Real-model gate not required by changed-file classification."
+
+  ios-katago-cmake-gate:
+    name: iOS KataGo CMake Gate
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_ios_katago_cmake == 'true')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Classify changed surfaces
+        id: classify
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/qixi_changed_surface_gate.py --github-output "$GITHUB_OUTPUT"
+      - name: Record iOS KataGo CMake triggering files
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_ios_katago_cmake == 'true'
+        run: |
+          echo "iOS KataGo CMake-relevant files changed:"
+          printf '%s\n' "${{ steps.classify.outputs.ios_katago_cmake_relevant_files }}"
+      - name: Run iOS KataGo CMake quality gate
+        if: (github.event_name == 'workflow_dispatch' && inputs.run_ios_katago_cmake == 'true') || steps.classify.outputs.requires_ios_katago_cmake == 'true'
+        env:
+          QIXI_RUN_IOS_KATAGO_CMAKE: "1"
+        run: scripts/qixi-quality-gate.sh
+      - name: Record iOS KataGo CMake gate skip
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_ios_katago_cmake != 'true'
+        run: echo "iOS KataGo CMake gate not required by changed-file classification."
+
+  native-release-sim-gate:
+    name: NativeRelease Simulator Gate
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_native_release_sim == 'true')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Classify changed surfaces
+        id: classify
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/qixi_changed_surface_gate.py --github-output "$GITHUB_OUTPUT"
+      - name: Record NativeRelease simulator triggering files
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_native_release_sim == 'true'
+        run: |
+          echo "NativeRelease simulator-relevant files changed:"
+          printf '%s\n' "${{ steps.classify.outputs.native_release_sim_relevant_files }}"
+      - name: Run NativeRelease simulator quality gate
+        if: (github.event_name == 'workflow_dispatch' && inputs.run_native_release_sim == 'true') || steps.classify.outputs.requires_native_release_sim == 'true'
+        env:
+          QIXI_RUN_NATIVE_RELEASE_SIM: "1"
+        run: scripts/qixi-quality-gate.sh
+      - name: Record NativeRelease simulator gate skip
+        if: github.event_name == 'pull_request' && steps.classify.outputs.requires_native_release_sim != 'true'
+        run: echo "NativeRelease simulator gate not required by changed-file classification."
+
+  device-bridge-smoke-gate:
+    name: Device Bridge Smoke Gate
+    if: github.event_name == 'workflow_dispatch' && inputs.run_device_bridge_smoke == 'true'
+    runs-on: ${{ fromJSON(inputs.device_bridge_runner) }}
+    env:
+      QIXI_DEVICE_BACKEND_URL: ${{ secrets.QIXI_DEVICE_BACKEND_URL }}
+      QIXI_DEVICE_DEVELOPMENT_TEAM: ${{ secrets.QIXI_DEVICE_DEVELOPMENT_TEAM }}
+      QIXI_DEVICE_ID: ${{ secrets.QIXI_DEVICE_ID }}
+      QIXI_DEVICE_ALLOW_PROVISIONING_UPDATES: ${{ secrets.QIXI_DEVICE_ALLOW_PROVISIONING_UPDATES }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pillow
+      - name: Run device signing doctor
+        run: scripts/qixi-device-signing-doctor.sh
+      - name: Run physical-device bridge smoke quality gate
+        env:
+          QIXI_RUN_DEVICE_BRIDGE_SMOKE: "1"
+        run: scripts/qixi-quality-gate.sh
+
+  release-sensitive-review:
+    name: Release-Sensitive Review Classification
+    if: github.event_name == 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Classify changed surfaces
+        id: classify
+        run: python3 scripts/qixi_changed_surface_gate.py --github-output "$GITHUB_OUTPUT"
+      - name: Record release-sensitive review requirement
+        if: steps.classify.outputs.requires_release_review == 'true'
+        run: |
+          echo "Release/App Store-sensitive files changed:"
+          printf '%s\n' "${{ steps.classify.outputs.release_sensitive_files }}"
+          echo "Attach the required App Store/release evidence before claiming release readiness."
+      - name: Record release-sensitive review skip
+        if: steps.classify.outputs.requires_release_review != 'true'
+        run: echo "Release/App Store review not required by changed-file classification."

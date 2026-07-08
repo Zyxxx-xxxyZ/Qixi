@@ -1,0 +1,15 @@
+{
+  "images" : [
+    {
+      "filename" : "board-06-ink-paper-19x19.svg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "properties" : {
+    "preserves-vector-representation" : true
+  }
+}

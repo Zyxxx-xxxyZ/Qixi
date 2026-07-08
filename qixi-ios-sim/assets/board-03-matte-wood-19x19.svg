@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="960" viewBox="0 0 960 960" role="img" aria-labelledby="title desc">
+  <title id="title">Go board - matte wood 19x19</title>
+  <desc id="desc">Warm matte wood 19x19 board with simplified vector grain and visible star points.</desc>
+  <metadata>Original vector candidate generated for Qixi. No third-party source artwork.</metadata>
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e4b469"/>
+      <stop offset=".55" stop-color="#c78c3b"/>
+      <stop offset="1" stop-color="#ad7631"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="960" rx="0" fill="url(#wood)"/>
+  <path d="M0 116c190 40 312-20 474 18 148 35 290 25 486-16" fill="none" stroke="#ffdc94" stroke-width="24" opacity=".15"/>
+  <path d="M0 388c162-24 295 28 462-5 170-34 302-47 498 2" fill="none" stroke="#6e4218" stroke-width="20" opacity=".12"/>
+  <path d="M0 642c202 43 337-23 506 15 164 37 294 28 454-13" fill="none" stroke="#ffe0a0" stroke-width="18" opacity=".10"/>
+  <path d="M0 828c158-33 295 19 445-8 184-33 334-31 515 8" fill="none" stroke="#6a3e15" stroke-width="18" opacity=".10"/>
+  <g stroke="#2f1c0b" stroke-width="2.4" stroke-linecap="square">
+      <line x1="60" y1="60.000" x2="900" y2="60.000"/>
+      <line x1="60.000" y1="60" x2="60.000" y2="900"/>
+      <line x1="60" y1="106.667" x2="900" y2="106.667"/>
+      <line x1="106.667" y1="60" x2="106.667" y2="900"/>
+      <line x1="60" y1="153.333" x2="900" y2="153.333"/>
+      <line x1="153.333" y1="60" x2="153.333" y2="900"/>
+      <line x1="60" y1="200.000" x2="900" y2="200.000"/>
+      <line x1="200.000" y1="60" x2="200.000" y2="900"/>
+      <line x1="60" y1="246.667" x2="900" y2="246.667"/>
+      <line x1="246.667" y1="60" x2="246.667" y2="900"/>
+      <line x1="60" y1="293.333" x2="900" y2="293.333"/>
+      <line x1="293.333" y1="60" x2="293.333" y2="900"/>
+      <line x1="60" y1="340.000" x2="900" y2="340.000"/>
+      <line x1="340.000" y1="60" x2="340.000" y2="900"/>
+      <line x1="60" y1="386.667" x2="900" y2="386.667"/>
+      <line x1="386.667" y1="60" x2="386.667" y2="900"/>
+      <line x1="60" y1="433.333" x2="900" y2="433.333"/>
+      <line x1="433.333" y1="60" x2="433.333" y2="900"/>
+      <line x1="60" y1="480.000" x2="900" y2="480.000"/>
+      <line x1="480.000" y1="60" x2="480.000" y2="900"/>
+      <line x1="60" y1="526.667" x2="900" y2="526.667"/>
+      <line x1="526.667" y1="60" x2="526.667" y2="900"/>
+      <line x1="60" y1="573.333" x2="900" y2="573.333"/>
+      <line x1="573.333" y1="60" x2="573.333" y2="900"/>
+      <line x1="60" y1="620.000" x2="900" y2="620.000"/>
+      <line x1="620.000" y1="60" x2="620.000" y2="900"/>
+      <line x1="60" y1="666.667" x2="900" y2="666.667"/>
+      <line x1="666.667" y1="60" x2="666.667" y2="900"/>
+      <line x1="60" y1="713.333" x2="900" y2="713.333"/>
+      <line x1="713.333" y1="60" x2="713.333" y2="900"/>
+      <line x1="60" y1="760.000" x2="900" y2="760.000"/>
+      <line x1="760.000" y1="60" x2="760.000" y2="900"/>
+      <line x1="60" y1="806.667" x2="900" y2="806.667"/>
+      <line x1="806.667" y1="60" x2="806.667" y2="900"/>
+      <line x1="60" y1="853.333" x2="900" y2="853.333"/>
+      <line x1="853.333" y1="60" x2="853.333" y2="900"/>
+      <line x1="60" y1="900.000" x2="900" y2="900.000"/>
+      <line x1="900.000" y1="60" x2="900.000" y2="900"/>
+      </g>
+  <g fill="#2f1c0b">
+      <circle cx="200.000" cy="200.000" r="6"/>
+      <circle cx="480.000" cy="200.000" r="6"/>
+      <circle cx="760.000" cy="200.000" r="6"/>
+      <circle cx="200.000" cy="480.000" r="6"/>
+      <circle cx="480.000" cy="480.000" r="6"/>
+      <circle cx="760.000" cy="480.000" r="6"/>
+      <circle cx="200.000" cy="760.000" r="6"/>
+      <circle cx="480.000" cy="760.000" r="6"/>
+      <circle cx="760.000" cy="760.000" r="6"/>
+  </g>
+  <rect x="60" y="60" width="840" height="840" fill="none" stroke="#2f1c0b" stroke-width="3.24"/>
+</svg>

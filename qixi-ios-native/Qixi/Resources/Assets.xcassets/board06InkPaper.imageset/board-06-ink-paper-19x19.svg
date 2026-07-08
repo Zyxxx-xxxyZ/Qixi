@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="960" viewBox="0 0 960 960" role="img" aria-labelledby="title desc">
+  <title id="title">Go board - ink paper 19x19</title>
+  <desc id="desc">Paper and ink inspired 19x19 board for brand moments, README visuals, and empty states.</desc>
+  <metadata>Original vector candidate generated for Qixi. No third-party source artwork.</metadata>
+  
+  <rect width="960" height="960" rx="0" fill="#eee5d0"/>
+  <path d="M0 153c166-32 315 33 479-3 181-40 328-48 481-12" fill="none" stroke="#ffffff" stroke-width="46" opacity=".15"/>
+  <path d="M0 602c179 32 321-10 493 20 159 27 312 10 467-15" fill="none" stroke="#baa77b" stroke-width="38" opacity=".13"/>
+  <path d="M90 0c-7 153 24 312 1 470-22 154 17 324-4 490" fill="none" stroke="#fff7e7" stroke-width="30" opacity=".10"/>
+  <g stroke="#2f261d" stroke-width="2.15" stroke-linecap="square">
+      <line x1="60" y1="60.000" x2="900" y2="60.000"/>
+      <line x1="60.000" y1="60" x2="60.000" y2="900"/>
+      <line x1="60" y1="106.667" x2="900" y2="106.667"/>
+      <line x1="106.667" y1="60" x2="106.667" y2="900"/>
+      <line x1="60" y1="153.333" x2="900" y2="153.333"/>
+      <line x1="153.333" y1="60" x2="153.333" y2="900"/>
+      <line x1="60" y1="200.000" x2="900" y2="200.000"/>
+      <line x1="200.000" y1="60" x2="200.000" y2="900"/>
+      <line x1="60" y1="246.667" x2="900" y2="246.667"/>
+      <line x1="246.667" y1="60" x2="246.667" y2="900"/>
+      <line x1="60" y1="293.333" x2="900" y2="293.333"/>
+      <line x1="293.333" y1="60" x2="293.333" y2="900"/>
+      <line x1="60" y1="340.000" x2="900" y2="340.000"/>
+      <line x1="340.000" y1="60" x2="340.000" y2="900"/>
+      <line x1="60" y1="386.667" x2="900" y2="386.667"/>
+      <line x1="386.667" y1="60" x2="386.667" y2="900"/>
+      <line x1="60" y1="433.333" x2="900" y2="433.333"/>
+      <line x1="433.333" y1="60" x2="433.333" y2="900"/>
+      <line x1="60" y1="480.000" x2="900" y2="480.000"/>
+      <line x1="480.000" y1="60" x2="480.000" y2="900"/>
+      <line x1="60" y1="526.667" x2="900" y2="526.667"/>
+      <line x1="526.667" y1="60" x2="526.667" y2="900"/>
+      <line x1="60" y1="573.333" x2="900" y2="573.333"/>
+      <line x1="573.333" y1="60" x2="573.333" y2="900"/>
+      <line x1="60" y1="620.000" x2="900" y2="620.000"/>
+      <line x1="620.000" y1="60" x2="620.000" y2="900"/>
+      <line x1="60" y1="666.667" x2="900" y2="666.667"/>
+      <line x1="666.667" y1="60" x2="666.667" y2="900"/>
+      <line x1="60" y1="713.333" x2="900" y2="713.333"/>
+      <line x1="713.333" y1="60" x2="713.333" y2="900"/>
+      <line x1="60" y1="760.000" x2="900" y2="760.000"/>
+      <line x1="760.000" y1="60" x2="760.000" y2="900"/>
+      <line x1="60" y1="806.667" x2="900" y2="806.667"/>
+      <line x1="806.667" y1="60" x2="806.667" y2="900"/>
+      <line x1="60" y1="853.333" x2="900" y2="853.333"/>
+      <line x1="853.333" y1="60" x2="853.333" y2="900"/>
+      <line x1="60" y1="900.000" x2="900" y2="900.000"/>
+      <line x1="900.000" y1="60" x2="900.000" y2="900"/>
+      </g>
+  <g fill="#2f261d">
+      <circle cx="200.000" cy="200.000" r="6.2"/>
+      <circle cx="480.000" cy="200.000" r="6.2"/>
+      <circle cx="760.000" cy="200.000" r="6.2"/>
+      <circle cx="200.000" cy="480.000" r="6.2"/>
+      <circle cx="480.000" cy="480.000" r="6.2"/>
+      <circle cx="760.000" cy="480.000" r="6.2"/>
+      <circle cx="200.000" cy="760.000" r="6.2"/>
+      <circle cx="480.000" cy="760.000" r="6.2"/>
+      <circle cx="760.000" cy="760.000" r="6.2"/>
+  </g>
+  <rect x="60" y="60" width="840" height="840" fill="none" stroke="#2f261d" stroke-width="2.9025"/>
+</svg>

@@ -1,0 +1,675 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* QixiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000201 /* QixiApp.swift */; };
+		100000000000000000000102 /* QixiModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* QixiModels.swift */; };
+		100000000000000000000103 /* CandidatePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000203 /* CandidatePalette.swift */; };
+		100000000000000000000104 /* BackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000204 /* BackendClient.swift */; };
+		100000000000000000000105 /* QixiViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000205 /* QixiViewModel.swift */; };
+		100000000000000000000106 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* RootView.swift */; };
+		100000000000000000000107 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* BoardView.swift */; };
+		100000000000000000000108 /* LeftAnalysisPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000208 /* LeftAnalysisPane.swift */; };
+		10000000000000000000010A /* Resources/Images/board06InkPaper.png in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020C /* Resources/Images/board06InkPaper.png */; };
+		10000000000000000000010B /* Resources/Images/black19Yunzi.png in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020D /* Resources/Images/black19Yunzi.png */; };
+		10000000000000000000010C /* Resources/Images/whiteStone.png in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020E /* Resources/Images/whiteStone.png */; };
+		10000000000000000000010D /* Resources/Images/hermesGatewayPulse.png in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020F /* Resources/Images/hermesGatewayPulse.png */; };
+		10000000000000000000010E /* BundleImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000210 /* BundleImage.swift */; };
+		10000000000000000000010F /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000211 /* L10n.swift */; };
+		100000000000000000000110 /* QixiPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000212 /* QixiPersistence.swift */; };
+		100000000000000000000111 /* QixiSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000213 /* QixiSync.swift */; };
+		100000000000000000000112 /* QixiUtilitySheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000215 /* QixiUtilitySheets.swift */; };
+		100000000000000000000113 /* QixiSGFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000216 /* QixiSGFParser.swift */; };
+		100000000000000000000114 /* QixiBoardImageRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000217 /* QixiBoardImageRecognizer.swift */; };
+		100000000000000000000115 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000218 /* PrivacyInfo.xcprivacy */; };
+		100000000000000000000116 /* VariationTreeLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000219 /* VariationTreeLayout.swift */; };
+		100000000000000000000117 /* QixiAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000021A /* QixiAnalysisService.swift */; };
+		100000000000000000000118 /* QixiNativeKataGoBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000021C /* QixiNativeKataGoBridge.mm */; };
+		100000000000000000000119 /* QixiNativeKataGoCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000021F /* QixiNativeKataGoCore.cpp */; };
+		10000000000000000000011A /* QixiNativeModelRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000220 /* QixiNativeModelRegistry.swift */; };
+		10000000000000000000011B /* QixiPositionIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* QixiPositionIdentity.swift */; };
+		10000000000000000000011C /* QixiHTTPBridgeAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* QixiHTTPBridgeAnalysisService.swift */; };
+		10000000000000000000011D /* QixiNativeKataGoAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* QixiNativeKataGoAnalysisService.swift */; };
+		10000000000000000000011E /* QixiNativeModelIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* QixiNativeModelIntegrity.swift */; };
+		10000000000000000000011F /* QixiNativeModelInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000225 /* QixiNativeModelInstaller.swift */; };
+		100000000000000000000120 /* QixiNativeModelInstallReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000226 /* QixiNativeModelInstallReceipt.swift */; };
+		100000000000000000000121 /* QixiNativeKataGoEngine.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000227 /* QixiNativeKataGoEngine.cpp */; };
+		100000000000000000000122 /* QixiRealDeviceEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000228 /* QixiRealDeviceEvidence.swift */; };
+		100000000000000000000123 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 100000000000000000000229 /* Metal.framework */; };
+		100000000000000000000124 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022A /* Accelerate.framework */; };
+		100000000000000000000125 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022C /* CoreML.framework */; };
+		100000000000000000000126 /* MetalPerformanceShaders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022D /* MetalPerformanceShaders.framework */; };
+		100000000000000000000127 /* MetalPerformanceShadersGraph.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022E /* MetalPerformanceShadersGraph.framework */; };
+		100000000000000000000128 /* g170-b6c96-s175395328-d26788732.bin.gz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */; };
+		100000000000000000000129 /* b18nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* b18nbt.bin */; };
+		10000000000000000000012A /* b28nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000231 /* b28nbt.bin */; };
+		10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* QixiMemoryTelemetry.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000201 /* QixiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiApp.swift; sourceTree = "<group>"; };
+		100000000000000000000202 /* QixiModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiModels.swift; sourceTree = "<group>"; };
+		100000000000000000000203 /* CandidatePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatePalette.swift; sourceTree = "<group>"; };
+		100000000000000000000204 /* BackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendClient.swift; sourceTree = "<group>"; };
+		100000000000000000000205 /* QixiViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiViewModel.swift; sourceTree = "<group>"; };
+		100000000000000000000206 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		100000000000000000000207 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
+		100000000000000000000208 /* LeftAnalysisPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftAnalysisPane.swift; sourceTree = "<group>"; };
+		10000000000000000000020A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		10000000000000000000020B /* Qixi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Qixi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		10000000000000000000020C /* Resources/Images/board06InkPaper.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Resources/Images/board06InkPaper.png; sourceTree = "<group>"; };
+		10000000000000000000020D /* Resources/Images/black19Yunzi.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Resources/Images/black19Yunzi.png; sourceTree = "<group>"; };
+		10000000000000000000020E /* Resources/Images/whiteStone.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Resources/Images/whiteStone.png; sourceTree = "<group>"; };
+		10000000000000000000020F /* Resources/Images/hermesGatewayPulse.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Resources/Images/hermesGatewayPulse.png; sourceTree = "<group>"; };
+		100000000000000000000210 /* BundleImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundleImage.swift; sourceTree = "<group>"; };
+		100000000000000000000211 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
+		100000000000000000000212 /* QixiPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiPersistence.swift; sourceTree = "<group>"; };
+		100000000000000000000213 /* QixiSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSync.swift; sourceTree = "<group>"; };
+		100000000000000000000214 /* Qixi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Qixi.entitlements; sourceTree = "<group>"; };
+		100000000000000000000215 /* QixiUtilitySheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiUtilitySheets.swift; sourceTree = "<group>"; };
+		100000000000000000000216 /* QixiSGFParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSGFParser.swift; sourceTree = "<group>"; };
+		100000000000000000000217 /* QixiBoardImageRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiBoardImageRecognizer.swift; sourceTree = "<group>"; };
+		100000000000000000000218 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		100000000000000000000219 /* VariationTreeLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariationTreeLayout.swift; sourceTree = "<group>"; };
+		10000000000000000000021A /* QixiAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiAnalysisService.swift; sourceTree = "<group>"; };
+		10000000000000000000021B /* QixiNativeKataGoBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = QixiNativeKataGoBridge.h; sourceTree = "<group>"; };
+		10000000000000000000021C /* QixiNativeKataGoBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = QixiNativeKataGoBridge.mm; sourceTree = "<group>"; };
+		10000000000000000000021D /* Qixi-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Qixi-Bridging-Header.h"; sourceTree = "<group>"; };
+		10000000000000000000021E /* QixiNativeKataGoCore.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = QixiNativeKataGoCore.hpp; sourceTree = "<group>"; };
+		10000000000000000000021F /* QixiNativeKataGoCore.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = QixiNativeKataGoCore.cpp; sourceTree = "<group>"; };
+		100000000000000000000220 /* QixiNativeModelRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiNativeModelRegistry.swift; sourceTree = "<group>"; };
+		100000000000000000000221 /* QixiPositionIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiPositionIdentity.swift; sourceTree = "<group>"; };
+		100000000000000000000222 /* QixiHTTPBridgeAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiHTTPBridgeAnalysisService.swift; sourceTree = "<group>"; };
+		100000000000000000000223 /* QixiNativeKataGoAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiNativeKataGoAnalysisService.swift; sourceTree = "<group>"; };
+		100000000000000000000224 /* QixiNativeModelIntegrity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiNativeModelIntegrity.swift; sourceTree = "<group>"; };
+		100000000000000000000225 /* QixiNativeModelInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiNativeModelInstaller.swift; sourceTree = "<group>"; };
+		100000000000000000000226 /* QixiNativeModelInstallReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiNativeModelInstallReceipt.swift; sourceTree = "<group>"; };
+		100000000000000000000227 /* QixiNativeKataGoEngine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = QixiNativeKataGoEngine.cpp; sourceTree = "<group>"; };
+		100000000000000000000228 /* QixiRealDeviceEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiRealDeviceEvidence.swift; sourceTree = "<group>"; };
+		100000000000000000000229 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		10000000000000000000022A /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
+		10000000000000000000022B /* NativeReleaseInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NativeReleaseInfo.plist; sourceTree = "<group>"; };
+		10000000000000000000022C /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
+		10000000000000000000022D /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
+		10000000000000000000022E /* MetalPerformanceShadersGraph.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShadersGraph.framework; path = System/Library/Frameworks/MetalPerformanceShadersGraph.framework; sourceTree = SDKROOT; };
+		10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; name = "g170-b6c96-s175395328-d26788732.bin.gz"; path = "../../KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz"; sourceTree = "<group>"; };
+		100000000000000000000230 /* b18nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b18nbt.bin; path = "../../b18nbt.bin"; sourceTree = "<group>"; };
+		100000000000000000000231 /* b28nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b28nbt.bin; path = "../../b28nbt.bin"; sourceTree = "<group>"; };
+		100000000000000000000232 /* QixiMemoryTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryTelemetry.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000301 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000123 /* Metal.framework in Frameworks */,
+				100000000000000000000124 /* Accelerate.framework in Frameworks */,
+				100000000000000000000125 /* CoreML.framework in Frameworks */,
+				100000000000000000000126 /* MetalPerformanceShaders.framework in Frameworks */,
+				100000000000000000000127 /* MetalPerformanceShadersGraph.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000401 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000402 /* Qixi */,
+				100000000000000000000405 /* Frameworks */,
+				100000000000000000000403 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000402 /* Qixi */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000201 /* QixiApp.swift */,
+				100000000000000000000202 /* QixiModels.swift */,
+				100000000000000000000203 /* CandidatePalette.swift */,
+				100000000000000000000204 /* BackendClient.swift */,
+				10000000000000000000021A /* QixiAnalysisService.swift */,
+				100000000000000000000222 /* QixiHTTPBridgeAnalysisService.swift */,
+				100000000000000000000223 /* QixiNativeKataGoAnalysisService.swift */,
+				100000000000000000000221 /* QixiPositionIdentity.swift */,
+				100000000000000000000220 /* QixiNativeModelRegistry.swift */,
+				100000000000000000000224 /* QixiNativeModelIntegrity.swift */,
+				100000000000000000000225 /* QixiNativeModelInstaller.swift */,
+				100000000000000000000226 /* QixiNativeModelInstallReceipt.swift */,
+				10000000000000000000021B /* QixiNativeKataGoBridge.h */,
+				10000000000000000000021C /* QixiNativeKataGoBridge.mm */,
+				10000000000000000000021E /* QixiNativeKataGoCore.hpp */,
+				10000000000000000000021F /* QixiNativeKataGoCore.cpp */,
+				100000000000000000000227 /* QixiNativeKataGoEngine.cpp */,
+				10000000000000000000021D /* Qixi-Bridging-Header.h */,
+				100000000000000000000205 /* QixiViewModel.swift */,
+				100000000000000000000206 /* RootView.swift */,
+				100000000000000000000207 /* BoardView.swift */,
+				100000000000000000000208 /* LeftAnalysisPane.swift */,
+				100000000000000000000210 /* BundleImage.swift */,
+				100000000000000000000211 /* L10n.swift */,
+				100000000000000000000212 /* QixiPersistence.swift */,
+				100000000000000000000213 /* QixiSync.swift */,
+				100000000000000000000228 /* QixiRealDeviceEvidence.swift */,
+				100000000000000000000232 /* QixiMemoryTelemetry.swift */,
+				100000000000000000000215 /* QixiUtilitySheets.swift */,
+				100000000000000000000216 /* QixiSGFParser.swift */,
+				100000000000000000000217 /* QixiBoardImageRecognizer.swift */,
+				100000000000000000000219 /* VariationTreeLayout.swift */,
+				100000000000000000000404 /* Images */,
+				100000000000000000000406 /* Models */,
+				10000000000000000000020A /* Info.plist */,
+				10000000000000000000022B /* NativeReleaseInfo.plist */,
+				100000000000000000000214 /* Qixi.entitlements */,
+				100000000000000000000218 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Qixi;
+			sourceTree = "<group>";
+		};
+		100000000000000000000403 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000020B /* Qixi.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000404 /* Images */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000020C /* Resources/Images/board06InkPaper.png */,
+				10000000000000000000020D /* Resources/Images/black19Yunzi.png */,
+				10000000000000000000020E /* Resources/Images/whiteStone.png */,
+				10000000000000000000020F /* Resources/Images/hermesGatewayPulse.png */,
+			);
+			name = Images;
+			sourceTree = "<group>";
+		};
+		100000000000000000000406 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */,
+				100000000000000000000230 /* b18nbt.bin */,
+				100000000000000000000231 /* b28nbt.bin */,
+			);
+			name = Models;
+			sourceTree = "<group>";
+		};
+		100000000000000000000405 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000229 /* Metal.framework */,
+				10000000000000000000022A /* Accelerate.framework */,
+				10000000000000000000022C /* CoreML.framework */,
+				10000000000000000000022D /* MetalPerformanceShaders.framework */,
+				10000000000000000000022E /* MetalPerformanceShadersGraph.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000501 /* Qixi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000701 /* Build configuration list for PBXNativeTarget "Qixi" */;
+			buildPhases = (
+				100000000000000000000601 /* Sources */,
+				100000000000000000000301 /* Frameworks */,
+				100000000000000000000602 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Qixi;
+			productName = Qixi;
+			productReference = 10000000000000000000020B /* Qixi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000901 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					100000000000000000000501 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 100000000000000000000801 /* Build configuration list for PBXProject "Qixi" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000401;
+			productRefGroup = 100000000000000000000403 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000501 /* Qixi */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000602 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000010A /* Resources/Images/board06InkPaper.png in Resources */,
+				10000000000000000000010B /* Resources/Images/black19Yunzi.png in Resources */,
+				10000000000000000000010C /* Resources/Images/whiteStone.png in Resources */,
+				10000000000000000000010D /* Resources/Images/hermesGatewayPulse.png in Resources */,
+				100000000000000000000115 /* PrivacyInfo.xcprivacy in Resources */,
+				100000000000000000000128 /* g170-b6c96-s175395328-d26788732.bin.gz in Resources */,
+				100000000000000000000129 /* b18nbt.bin in Resources */,
+				10000000000000000000012A /* b28nbt.bin in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000601 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000101 /* QixiApp.swift in Sources */,
+				100000000000000000000102 /* QixiModels.swift in Sources */,
+				100000000000000000000103 /* CandidatePalette.swift in Sources */,
+				100000000000000000000104 /* BackendClient.swift in Sources */,
+				100000000000000000000105 /* QixiViewModel.swift in Sources */,
+				100000000000000000000106 /* RootView.swift in Sources */,
+				100000000000000000000107 /* BoardView.swift in Sources */,
+				100000000000000000000108 /* LeftAnalysisPane.swift in Sources */,
+				10000000000000000000010E /* BundleImage.swift in Sources */,
+				10000000000000000000010F /* L10n.swift in Sources */,
+				100000000000000000000110 /* QixiPersistence.swift in Sources */,
+				100000000000000000000111 /* QixiSync.swift in Sources */,
+				100000000000000000000112 /* QixiUtilitySheets.swift in Sources */,
+				100000000000000000000113 /* QixiSGFParser.swift in Sources */,
+				100000000000000000000114 /* QixiBoardImageRecognizer.swift in Sources */,
+				100000000000000000000116 /* VariationTreeLayout.swift in Sources */,
+				100000000000000000000117 /* QixiAnalysisService.swift in Sources */,
+				100000000000000000000118 /* QixiNativeKataGoBridge.mm in Sources */,
+				100000000000000000000119 /* QixiNativeKataGoCore.cpp in Sources */,
+				100000000000000000000121 /* QixiNativeKataGoEngine.cpp in Sources */,
+				10000000000000000000011A /* QixiNativeModelRegistry.swift in Sources */,
+				10000000000000000000011B /* QixiPositionIdentity.swift in Sources */,
+				10000000000000000000011C /* QixiHTTPBridgeAnalysisService.swift in Sources */,
+				10000000000000000000011D /* QixiNativeKataGoAnalysisService.swift in Sources */,
+				10000000000000000000011E /* QixiNativeModelIntegrity.swift in Sources */,
+				10000000000000000000011F /* QixiNativeModelInstaller.swift in Sources */,
+				100000000000000000000120 /* QixiNativeModelInstallReceipt.swift in Sources */,
+				100000000000000000000122 /* QixiRealDeviceEvidence.swift in Sources */,
+				10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000000A01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		100000000000000000000A02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		100000000000000000000A03 /* NativeRelease */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = NativeRelease;
+		};
+		100000000000000000000B01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Qixi/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.board-games";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Qixi/Qixi-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		100000000000000000000B02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Qixi/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.board-games";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Qixi/Qixi-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		100000000000000000000B03 /* NativeRelease */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				ENABLE_PREVIEWS = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					BackendClient.swift,
+					QixiHTTPBridgeAnalysisService.swift,
+				);
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(QIXI_KATAGO_IOS_XCFRAMEWORK)",
+				);
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"QIXI_ENABLE_NATIVE_KATAGO=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../KataGo/cpp",
+					"$(KATAGO_CPP_INCLUDE_DIR)",
+				);
+				INFOPLIST_FILE = Qixi/NativeReleaseInfo.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.board-games";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(QIXI_KATAGO_IOS_LIBRARY_DIR)",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"$(QIXI_KATAGO_IOS_LIBRARY)",
+					"-lKataGoSwift",
+					"-framework",
+					Metal,
+					"-framework",
+					Accelerate,
+					"-framework",
+					CoreML,
+					"-framework",
+					MetalPerformanceShaders,
+					"-framework",
+					MetalPerformanceShadersGraph,
+					"-lz",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D QIXI_NATIVE_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = QIXI_NATIVE_RELEASE;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Qixi/Qixi-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = NativeRelease;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000701 /* Build configuration list for PBXNativeTarget "Qixi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000B01 /* Debug */,
+				100000000000000000000B02 /* Release */,
+				100000000000000000000B03 /* NativeRelease */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000801 /* Build configuration list for PBXProject "Qixi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000A01 /* Debug */,
+				100000000000000000000A02 /* Release */,
+				100000000000000000000A03 /* NativeRelease */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000901 /* Project object */;
+}
