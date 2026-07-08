@@ -14,7 +14,7 @@ It provides:
 ## Run Locally
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 python3 qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
 ```
 
@@ -39,7 +39,7 @@ To open it on a physical iPad, put the Mac and iPad on the same network and open
 Build KataGo first:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2/KataGo
+cd /Users/zyx/Desktop/projects/Qixi/KataGo
 /opt/homebrew/bin/cmake -G Ninja -S cpp -B cpp/build-metal-mux -DUSE_BACKEND=METAL -DCMAKE_BUILD_TYPE=Release -DNO_GIT_REVISION=1
 /opt/homebrew/bin/cmake --build cpp/build-metal-mux --target katago -j 6
 ```
@@ -48,19 +48,19 @@ The backend defaults to the real models in this checkout when these engines are
 selected:
 
 ```text
-b6     /Users/zyx/Desktop/projects/katago2/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
-b18nbt /Users/zyx/Desktop/projects/katago2/b18nbt.bin
-b28nbt /Users/zyx/Desktop/projects/katago2/b28nbt.bin
+b6     /Users/zyx/Desktop/projects/Qixi/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
+b18nbt /Users/zyx/Desktop/projects/Qixi/b18nbt.bin
+b28nbt /Users/zyx/Desktop/projects/Qixi/b28nbt.bin
 ```
 
 To force a specific model and optional config:
 
 ```sh
-export QIXI_KATAGO_BIN=/Users/zyx/Desktop/projects/katago2/KataGo/cpp/build-metal-mux/katago
-export QIXI_KATAGO_MODEL=/Users/zyx/Desktop/projects/katago2/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
-export QIXI_KATAGO_CONFIG=/Users/zyx/Desktop/projects/katago2/KataGo/cpp/configs/analysis_example.cfg
-export QIXI_KATAGO_OVERRIDE="$(cat /Users/zyx/Desktop/projects/katago2/qixi-ios-sim/configs/metal-mux.override)"
-python3 /Users/zyx/Desktop/projects/katago2/qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
+export QIXI_KATAGO_BIN=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/build-metal-mux/katago
+export QIXI_KATAGO_MODEL=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
+export QIXI_KATAGO_CONFIG=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/configs/analysis_example.cfg
+export QIXI_KATAGO_OVERRIDE="$(cat /Users/zyx/Desktop/projects/Qixi/qixi-ios-sim/configs/metal-mux.override)"
+python3 /Users/zyx/Desktop/projects/Qixi/qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
 ```
 
 Optional per-engine overrides:

@@ -678,8 +678,8 @@ Available destinations for the "Qixi" scheme:
     output = """
 2026-07-06 12:36:19.669 xcodebuild[95703:736297]  DVTDeveloperAccountManager: Failed to load credentials for UUID: Error Domain=DVTDeveloperAccountCredentialsError Code=0 "Invalid credentials in keychain, missing Xcode-Username"
 error: No Account for Team "ABCDE12345". Add a new account in Accounts settings.
-/Users/zyx/Desktop/projects/katago2/qixi-ios-native/Qixi.xcodeproj: error: No Accounts: Add a new account in Accounts settings.
-/Users/zyx/Desktop/projects/katago2/qixi-ios-native/Qixi.xcodeproj: error: No profiles for 'com.qixi.localanalysis' were found.
+/Users/zyx/Desktop/projects/Qixi/qixi-ios-native/Qixi.xcodeproj: error: No Accounts: Add a new account in Accounts settings.
+/Users/zyx/Desktop/projects/Qixi/qixi-ios-native/Qixi.xcodeproj: error: No profiles for 'com.qixi.localanalysis' were found.
 Build settings for action build and target Qixi:
 """.strip()
     problems = preflight.xcode_account_probe_problem_messages(output)

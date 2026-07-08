@@ -23,7 +23,7 @@ Simulator and on a physical iPad or iPhone. It also states what each path proves
 ## Build The Native App For Simulator
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 xcodebuild \
   -project qixi-ios-native/Qixi.xcodeproj \
   -scheme Qixi \
@@ -39,7 +39,7 @@ xcodebuild \
 For a one-command interactive iPad Simulator run:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 qixi-ios-native/scripts/run-native-sim.sh
 ```
 
@@ -72,7 +72,7 @@ before invoking Xcode, then refuses to install the simulator app unless
 First verify and boot the screenshot environment:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 qixi-ios-native/scripts/screenshot-environment-doctor.sh
 ```
 
@@ -102,7 +102,7 @@ inspector so the generated and verified evidence stays bound together.
 Then run the targeted screenshot captures:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 qixi-ios-native/scripts/screenshot-sim.sh
 qixi-ios-native/scripts/screenshot-iphone-sim.sh
 ```
@@ -168,7 +168,7 @@ for real-device Instruments evidence.
 Build KataGo with the Metal backend if the local binary is not present:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2/KataGo
+cd /Users/zyx/Desktop/projects/Qixi/KataGo
 /opt/homebrew/bin/cmake -G Ninja -S cpp -B cpp/build-metal-mux -DUSE_BACKEND=METAL -DCMAKE_BUILD_TYPE=Release -DNO_GIT_REVISION=1
 /opt/homebrew/bin/cmake --build cpp/build-metal-mux --target katago -j 6
 ```
@@ -176,10 +176,10 @@ cd /Users/zyx/Desktop/projects/katago2/KataGo
 Start the development backend:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
-export QIXI_KATAGO_BIN=/Users/zyx/Desktop/projects/katago2/KataGo/cpp/build-metal-mux/katago
-export QIXI_KATAGO_CONFIG=/Users/zyx/Desktop/projects/katago2/KataGo/cpp/configs/analysis_example.cfg
-export QIXI_KATAGO_OVERRIDE="$(cat /Users/zyx/Desktop/projects/katago2/qixi-ios-sim/configs/metal-mux.override)"
+cd /Users/zyx/Desktop/projects/Qixi
+export QIXI_KATAGO_BIN=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/build-metal-mux/katago
+export QIXI_KATAGO_CONFIG=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/configs/analysis_example.cfg
+export QIXI_KATAGO_OVERRIDE="$(cat /Users/zyx/Desktop/projects/Qixi/qixi-ios-sim/configs/metal-mux.override)"
 python3 qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
 ```
 
@@ -444,7 +444,7 @@ camera, iCloud, background restore, or App Store archive identity.
 Before a `nativeInProcess` iPad/iPhone release run, create a run-kit template:
 
 ```sh
-cd /Users/zyx/Desktop/projects/katago2
+cd /Users/zyx/Desktop/projects/Qixi
 scripts/qixi-real-device-evidence-template.py \
   --output-dir /tmp/qixi-real-device-run
 ```
@@ -490,7 +490,7 @@ the same evidence file and the matching `.xcarchive`.
 1. Open the Xcode project:
 
    ```sh
-   open /Users/zyx/Desktop/projects/katago2/qixi-ios-native/Qixi.xcodeproj
+   open /Users/zyx/Desktop/projects/Qixi/qixi-ios-native/Qixi.xcodeproj
    ```
 
 2. Select the `Qixi` scheme and the connected iPad or iPhone.
@@ -521,7 +521,7 @@ the same evidence file and the matching `.xcarchive`.
 4. Start the backend on the Mac:
 
    ```sh
-   cd /Users/zyx/Desktop/projects/katago2
+   cd /Users/zyx/Desktop/projects/Qixi
    python3 qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
    ```
 
