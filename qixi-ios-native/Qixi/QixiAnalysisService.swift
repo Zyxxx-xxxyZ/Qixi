@@ -251,6 +251,258 @@ protocol QixiEngineTombstoneService {
   func restoreEngineTombstone(from url: URL, for engine: AnalysisEngine) async throws
 }
 
+enum QixiCoreRootReference: Equatable {
+  case node(UInt32)
+  case intent(UInt64)
+  case lineage(UInt64)
+
+  var kind: String {
+    switch self {
+    case .node: return "node"
+    case .intent: return "intent"
+    case .lineage: return "lineage"
+    }
+  }
+
+  var value: UInt64 {
+    switch self {
+    case .node(let id): return UInt64(id)
+    case .intent(let id): return id
+    case .lineage(let hash): return hash
+    }
+  }
+}
+
+enum QixiCoreRequest: Encodable {
+  case boot(loadLastState: Bool, firstLaunch: Bool, expectedBackendEpoch: UInt64 = 0)
+  case selectEngine(AnalysisEngine, expectedBackendEpoch: UInt64 = 0)
+  case setKomi(Double, expectedBackendEpoch: UInt64 = 0)
+  case setWideRootNoise(Double, expectedBackendEpoch: UInt64 = 0)
+  case newGame(komi: Double, nextPla: StoneColor, expectedBackendEpoch: UInt64 = 0)
+  case playMove(move: Int, uiIntentId: UInt64, parentRoot: QixiCoreRootReference, expectedBackendEpoch: UInt64 = 0)
+  case undo(steps: Int, expectedBackendEpoch: UInt64 = 0)
+  case redo(steps: Int, expectedBackendEpoch: UInt64 = 0)
+  case jumpToNode(QixiCoreRootReference, expectedBackendEpoch: UInt64 = 0)
+  case setTerritoryMode(Bool, expectedBackendEpoch: UInt64 = 0)
+  case enterBackground(deadlineMs: UInt32, expectedBackendEpoch: UInt64 = 0)
+  case enterForeground(expectedBackendEpoch: UInt64 = 0)
+  case autosaveTick(reason: String, expectedBackendEpoch: UInt64 = 0)
+  case exportAnalysisState(path: String, expectedBackendEpoch: UInt64 = 0)
+  case importAnalysisState(path: String, expectedBackendEpoch: UInt64 = 0)
+  case applyRecognizedBoard(setupStones: [BoardSetupStone], nextPla: StoneColor, expectedBackendEpoch: UInt64 = 0)
+
+  private enum CodingKeys: String, CodingKey {
+    case kind
+    case expectedBackendEpoch
+    case payload
+  }
+
+  private enum PayloadKeys: String, CodingKey {
+    case loadLastState
+    case firstLaunch
+    case modelId
+    case komi
+    case noise
+    case nextPla
+    case move
+    case uiIntentId
+    case parentRootKind
+    case parentRootValue
+    case steps
+    case node
+    case targetRootKind
+    case targetRootValue
+    case enabled
+    case deadlineMs
+    case reason
+    case path
+    case setupStones
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    var payload = container.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+    switch self {
+    case .boot(let loadLastState, let firstLaunch, let expectedBackendEpoch):
+      try container.encode("boot", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(loadLastState, forKey: .loadLastState)
+      try payload.encode(firstLaunch, forKey: .firstLaunch)
+    case .selectEngine(let engine, let expectedBackendEpoch):
+      try container.encode("selectEngine", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(engine.rawValue, forKey: .modelId)
+    case .setKomi(let komi, let expectedBackendEpoch):
+      try container.encode("setKomi", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(komi, forKey: .komi)
+    case .setWideRootNoise(let noise, let expectedBackendEpoch):
+      try container.encode("setWideRootNoise", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(noise, forKey: .noise)
+    case .newGame(let komi, let nextPla, let expectedBackendEpoch):
+      try container.encode("newGame", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(komi, forKey: .komi)
+      try payload.encode(nextPla == .black ? "black" : "white", forKey: .nextPla)
+    case .playMove(let move, let uiIntentId, let parentRoot, let expectedBackendEpoch):
+      try container.encode("playMove", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(move, forKey: .move)
+      try payload.encode(uiIntentId, forKey: .uiIntentId)
+      try payload.encode(parentRoot.kind, forKey: .parentRootKind)
+      try payload.encode(parentRoot.value, forKey: .parentRootValue)
+    case .undo(let steps, let expectedBackendEpoch):
+      try container.encode("undo", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(steps, forKey: .steps)
+    case .redo(let steps, let expectedBackendEpoch):
+      try container.encode("redo", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(steps, forKey: .steps)
+    case .jumpToNode(let targetRoot, let expectedBackendEpoch):
+      try container.encode("jumpToNode", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(targetRoot.kind, forKey: .targetRootKind)
+      try payload.encode(targetRoot.value, forKey: .targetRootValue)
+    case .setTerritoryMode(let enabled, let expectedBackendEpoch):
+      try container.encode("setTerritoryMode", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(enabled, forKey: .enabled)
+    case .enterBackground(let deadlineMs, let expectedBackendEpoch):
+      try container.encode("enterBackground", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(deadlineMs, forKey: .deadlineMs)
+    case .enterForeground(let expectedBackendEpoch):
+      try container.encode("enterForeground", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+    case .autosaveTick(let reason, let expectedBackendEpoch):
+      try container.encode("autosaveTick", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(reason, forKey: .reason)
+    case .exportAnalysisState(let path, let expectedBackendEpoch):
+      try container.encode("exportAnalysisState", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(path, forKey: .path)
+    case .importAnalysisState(let path, let expectedBackendEpoch):
+      try container.encode("importAnalysisState", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(path, forKey: .path)
+    case .applyRecognizedBoard(let setupStones, let nextPla, let expectedBackendEpoch):
+      try container.encode("applyRecognizedBoard", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(setupStones, forKey: .setupStones)
+      try payload.encode(nextPla == .black ? "black" : "white", forKey: .nextPla)
+    }
+  }
+}
+
+extension QixiCoreRequest {
+  func replacingExpectedBackendEpoch(_ epoch: UInt64) -> QixiCoreRequest {
+    switch self {
+    case .boot(let loadLastState, let firstLaunch, _):
+      return .boot(loadLastState: loadLastState, firstLaunch: firstLaunch, expectedBackendEpoch: epoch)
+    case .selectEngine(let engine, _):
+      return .selectEngine(engine, expectedBackendEpoch: epoch)
+    case .setKomi(let komi, _):
+      return .setKomi(komi, expectedBackendEpoch: epoch)
+    case .setWideRootNoise(let noise, _):
+      return .setWideRootNoise(noise, expectedBackendEpoch: epoch)
+    case .newGame(let komi, let nextPla, _):
+      return .newGame(komi: komi, nextPla: nextPla, expectedBackendEpoch: epoch)
+    case .playMove(let move, let uiIntentId, let parentRoot, _):
+      return .playMove(move: move, uiIntentId: uiIntentId, parentRoot: parentRoot, expectedBackendEpoch: epoch)
+    case .undo(let steps, _):
+      return .undo(steps: steps, expectedBackendEpoch: epoch)
+    case .redo(let steps, _):
+      return .redo(steps: steps, expectedBackendEpoch: epoch)
+    case .jumpToNode(let targetRoot, _):
+      return .jumpToNode(targetRoot, expectedBackendEpoch: epoch)
+    case .setTerritoryMode(let enabled, _):
+      return .setTerritoryMode(enabled, expectedBackendEpoch: epoch)
+    case .enterBackground(let deadlineMs, _):
+      return .enterBackground(deadlineMs: deadlineMs, expectedBackendEpoch: epoch)
+    case .enterForeground:
+      return .enterForeground(expectedBackendEpoch: epoch)
+    case .autosaveTick(let reason, _):
+      return .autosaveTick(reason: reason, expectedBackendEpoch: epoch)
+    case .exportAnalysisState(let path, _):
+      return .exportAnalysisState(path: path, expectedBackendEpoch: epoch)
+    case .importAnalysisState(let path, _):
+      return .importAnalysisState(path: path, expectedBackendEpoch: epoch)
+    case .applyRecognizedBoard(let setupStones, let nextPla, _):
+      return .applyRecognizedBoard(
+        setupStones: setupStones,
+        nextPla: nextPla,
+        expectedBackendEpoch: epoch
+      )
+    }
+  }
+}
+
+struct QixiCoreBackendResult: Decodable {
+  var requestId: UInt64
+  var backendEpoch: UInt64
+  var revision: UInt64
+  var ok: Bool
+  var message: String
+  var currentRoot: UInt32
+  var engineState: String
+  var storeState: String
+  var committedUiIntentId: UInt64?
+  var snapshot: QixiCoreSnapshot?
+}
+
+struct QixiCoreSnapshot: Decodable {
+  var root: UInt32
+  var rootLineageHash: UInt64
+  var rootVisits: UInt64
+  var rootWinrate: Double
+  var rootScoreMean: Double
+  var hasOwnership: Bool
+  var candidates: [QixiCoreCandidate]
+  var visibleTree: [QixiCoreTreeNode]
+  var ownership: [Double]
+}
+
+struct QixiCoreCandidate: Decodable {
+  var move: Int
+  var pass: Bool
+  var x: Int
+  var y: Int
+  var visits: UInt64
+  var prior: Double
+  var winrate: Double
+  var scoreMean: Double
+  var utility: Double
+}
+
+struct QixiCoreTreeNode: Decodable {
+  var id: UInt32
+  var lineageHash: UInt64
+  var parent: UInt32?
+  var moveFromParent: Int
+  var moveColor: String
+  var ply: UInt32
+  var visits: UInt64
+  var winrate: Double
+  var scoreMean: Double
+  var analyzed: Bool
+  var qualityDeltaPercent: Double?
+}
+
+struct QixiCoreLegalMoveMask: Decodable {
+  var legal: [Bool]
+}
+
+protocol QixiCoreBackendService {
+  func submitCoreRequest(_ request: QixiCoreRequest) async throws -> QixiCoreBackendResult
+  func latestCoreSnapshot() async throws -> QixiCoreBackendResult
+  func legalMoveMask() async throws -> QixiCoreLegalMoveMask
+  func exportCoreState(to url: URL) async throws
+  func importCoreState(from url: URL) async throws
+}
+
 extension QixiRuntimeConfig {
   #if QIXI_NATIVE_RELEASE
   static func analysisRuntime(

@@ -22,7 +22,7 @@ struct VariationTreeLayoutSmoke {
     edges.append(VariationEdge(from: "b6a", to: "b7a"))
     edges.append(VariationEdge(from: "m10", to: "b10a"))
 
-    let tree = VariationTree(nodes: nodes, edges: edges)
+    let tree = VariationTree(nodes: nodes, edges: edges, currentNodeID: "m8")
     let layout = VariationTreeLayout(tree: tree, availableHeight: 220)
 
     expect(layout.nodes.count == nodes.count, "all nodes are laid out")

@@ -49,16 +49,23 @@ struct BoardBackgroundCanvas: View {
       context.fill(Path(rect), with: .color(boardColor))
 
       let lineWidth = max(1.0, side * 0.0021)
+      let edgeInset = lineWidth * 0.5
+      func visibleGridCoordinate(_ index: Int) -> CGFloat {
+        if index == 0 { return edgeInset }
+        if index == BoardGeometry.boardSize - 1 { return side - edgeInset }
+        return side * CGFloat(index) * BoardGeometry.step
+      }
       for index in 0..<BoardGeometry.boardSize {
-        let startVertical = BoardGeometry.intersection(x: index, y: 0, side: side)
-        let endVertical = BoardGeometry.intersection(x: index, y: BoardGeometry.boardSize - 1, side: side)
+        let axis = visibleGridCoordinate(index)
+        let startVertical = CGPoint(x: axis, y: edgeInset)
+        let endVertical = CGPoint(x: axis, y: side - edgeInset)
         var vertical = Path()
         vertical.move(to: startVertical)
         vertical.addLine(to: endVertical)
         context.stroke(vertical, with: .color(lineColor), lineWidth: lineWidth)
 
-        let startHorizontal = BoardGeometry.intersection(x: 0, y: index, side: side)
-        let endHorizontal = BoardGeometry.intersection(x: BoardGeometry.boardSize - 1, y: index, side: side)
+        let startHorizontal = CGPoint(x: edgeInset, y: axis)
+        let endHorizontal = CGPoint(x: side - edgeInset, y: axis)
         var horizontal = Path()
         horizontal.move(to: startHorizontal)
         horizontal.addLine(to: endHorizontal)

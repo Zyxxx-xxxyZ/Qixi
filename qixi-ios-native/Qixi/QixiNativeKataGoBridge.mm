@@ -19,6 +19,20 @@ NSString * const QixiNativeKataGoErrorDomain = @"QixiNativeKataGo";
   self = [super init];
   if (self) {
     _core = std::make_unique<qixi::NativeKataGoCore>();
+    NSURL *applicationSupport = [[NSFileManager defaultManager]
+      URLsForDirectory:NSApplicationSupportDirectory
+      inDomains:NSUserDomainMask].firstObject;
+    NSURL *storeDirectory = [[applicationSupport URLByAppendingPathComponent:@"Qixi" isDirectory:YES]
+      URLByAppendingPathComponent:@"CoreStores" isDirectory:YES];
+    NSError *directoryError = nil;
+    [[NSFileManager defaultManager]
+      createDirectoryAtURL:storeDirectory
+      withIntermediateDirectories:YES
+      attributes:nil
+      error:&directoryError];
+    if (directoryError == nil) {
+      _core->configureCoreStoreDirectory([self stringFromNSString:storeDirectory.path]);
+    }
   }
   return self;
 }
@@ -82,6 +96,51 @@ NSString * const QixiNativeKataGoErrorDomain = @"QixiNativeKataGo";
 
 - (BOOL)restoreTombstoneFromFile:(NSString *)filePath error:(NSError **)error {
   qixi::NativeKataGoResult result = _core->restoreTombstoneFromFile([self stringFromNSString:filePath]);
+  if (result.ok()) {
+    return YES;
+  }
+  [self populateError:error fromResult:result];
+  return NO;
+}
+
+- (nullable NSString *)submitCoreRequestJSON:(NSString *)requestJSON error:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->submitCoreRequestJSON([self stringFromNSString:requestJSON]);
+  if (result.ok()) {
+    return [NSString stringWithUTF8String:result.responseJSON.c_str()];
+  }
+  [self populateError:error fromResult:result];
+  return nil;
+}
+
+- (nullable NSString *)latestCoreSnapshotJSONWithError:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->latestCoreSnapshotJSON();
+  if (result.ok()) {
+    return [NSString stringWithUTF8String:result.responseJSON.c_str()];
+  }
+  [self populateError:error fromResult:result];
+  return nil;
+}
+
+- (nullable NSString *)legalMoveMaskJSONWithError:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->legalMoveMaskJSON();
+  if (result.ok()) {
+    return [NSString stringWithUTF8String:result.responseJSON.c_str()];
+  }
+  [self populateError:error fromResult:result];
+  return nil;
+}
+
+- (BOOL)exportCoreStateToFile:(NSString *)filePath error:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->exportCoreStateToFile([self stringFromNSString:filePath]);
+  if (result.ok()) {
+    return YES;
+  }
+  [self populateError:error fromResult:result];
+  return NO;
+}
+
+- (BOOL)importCoreStateFromFile:(NSString *)filePath error:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->importCoreStateFromFile([self stringFromNSString:filePath]);
   if (result.ok()) {
     return YES;
   }

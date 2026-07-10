@@ -126,6 +126,9 @@ enum L10n {
     case mctsStateExporting
     case mctsStateExportReady
     case mctsStateExportFailed
+    case backendRestoringState
+    case backendLoadingEngine
+    case backendInstallingModel
     case syncSheetTitle
     case syncEnabled
     case syncDisabled
@@ -199,6 +202,9 @@ enum L10n {
       .mctsStateExporting: "正在准备搜索状态",
       .mctsStateExportReady: "搜索状态已交给系统保存",
       .mctsStateExportFailed: "搜索状态导出失败",
+      .backendRestoringState: "正在恢复上次状态",
+      .backendLoadingEngine: "正在切换分析引擎",
+      .backendInstallingModel: "正在安装分析模型",
       .syncSheetTitle: "同步",
       .syncEnabled: "iCloud 已开启",
       .syncDisabled: "iCloud 未开启",
@@ -270,6 +276,9 @@ enum L10n {
       .mctsStateExporting: "正在準備搜尋狀態",
       .mctsStateExportReady: "搜尋狀態已交給系統儲存",
       .mctsStateExportFailed: "搜尋狀態匯出失敗",
+      .backendRestoringState: "正在恢復上次狀態",
+      .backendLoadingEngine: "正在切換分析引擎",
+      .backendInstallingModel: "正在安裝分析模型",
       .syncSheetTitle: "同步",
       .syncEnabled: "iCloud 已開啟",
       .syncDisabled: "iCloud 未開啟",
@@ -341,6 +350,9 @@ enum L10n {
       .mctsStateExporting: "Preparing Search State",
       .mctsStateExportReady: "Search State Sent to Files",
       .mctsStateExportFailed: "Search State Export Failed",
+      .backendRestoringState: "Restoring Previous State",
+      .backendLoadingEngine: "Switching Analysis Engine",
+      .backendInstallingModel: "Installing Analysis Model",
       .syncSheetTitle: "Sync",
       .syncEnabled: "iCloud Enabled",
       .syncDisabled: "iCloud Disabled",

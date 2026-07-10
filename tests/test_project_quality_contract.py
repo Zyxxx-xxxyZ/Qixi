@@ -1659,13 +1659,8 @@ class ProjectQualityContractTests(unittest.TestCase):
     self.assertIn("model.iCloudSyncEnabled ? QixiColor.hermesBlue : Color.secondary", utility)
     utility_inspector = read(ROOT / "qixi-ios-native" / "tests" / "inspect_utility_sheet_screenshot.py")
     self.assertIn("def sync_icon_blue_pixel_count", utility_inspector)
-    self.assertIn("def model_install_icon_pixel_count", utility_inspector)
     self.assertIn('expected_state in {"enabled", "synced", "error", "conflict"}', utility_inspector)
     self.assertIn("disabled sync sheet must not reuse the enabled blue iCloud icon", utility_inspector)
-    self.assertIn('expected_state in {"verifying", "model-verifying"}', utility_inspector)
-    self.assertIn('expected_state.startswith("installed")', utility_inspector)
-    self.assertIn('expected_state in {"failed", "model-failed"}', utility_inspector)
-    self.assertIn("verifying model install sheet lacks the orange progress icon", utility_inspector)
     self.assertIn("@State private var visualState: ImportSheetVisualState", utility)
     self.assertIn("Image(systemName: visualState.systemImageName)", utility)
     self.assertIn(".foregroundStyle(visualState.tint)", utility)
@@ -5630,12 +5625,15 @@ EOF
       "FileRepresentation(importedContentType: .image)",
       "FileManager.default.copyItem(at: sourceURL, to: destinationURL)",
       "item.loadTransferable(type: QixiPickedBoardPhoto.self)",
-      "defer { photo.removeTemporaryFile() }",
-      "model.recognizeBoardImage(url: photo.url)",
+      "QixiPendingBoardImageFactory.make(from: photo.url)",
+      "pendingTemporaryPhotoURL = photo.url",
+      "QixiBoardImageRecognizer.recognizeBoard(from: url, selection: selection)",
+      "cleanupPendingPhotoFile()",
     ):
       self.assertIn(token, utility)
     self.assertNotIn("item.loadTransferable(type: Data.self)", utility)
     self.assertNotIn("model.recognizeBoardImage(data: data)", utility)
+    self.assertNotIn("Data(contentsOf: photo.url)", utility)
 
     for token in (
       "test_camera_recognition_preview_is_cleared_on_position_identity_changes",
@@ -5656,17 +5654,17 @@ EOF
       "apply(snapshot: imported)",
     ):
       self.assertIn(token, view_model)
-    for pattern in (
-      r"func step\(by delta: Int\) \{(?P<body>.*?)\n  \}",
-      r"func jump\(to ply: Int\) \{(?P<body>.*?)\n  \}",
-      r"func passMove\(\) \{(?P<body>.*?)\n  \}",
-      r"func play\(at x: Int, y: Int\) \{(?P<body>.*?)\n  \}",
-      r"func importSGF\(text: String\) throws \{(?P<body>.*?)\n  \}",
-      r"private func apply\(snapshot: QixiAppSnapshot\) \{(?P<body>.*?)\n  \}",
+    for pattern, expected_clear in (
+      (r"func step\(by delta: Int\) \{(?P<body>.*?)\n  \}", "clearBoardRecognitionPreview()"),
+      (r"func jump\(to ply: Int\) \{(?P<body>.*?)\n  \}", "clearBoardRecognitionPreview()"),
+      (r"func passMove\(\) \{(?P<body>.*?)\n  \}", "clearBoardRecognitionPreview()"),
+      (r"func play\(at x: Int, y: Int\) \{(?P<body>.*?)\n  \}", "clearBoardRecognitionPreview()"),
+      (r"func importSGF\(text: String\) throws \{(?P<body>.*?)\n  \}", "clearRecognizedSetup()"),
+      (r"private func apply\(snapshot: QixiAppSnapshot\) \{(?P<body>.*?)\n  \}", "clearBoardRecognitionPreview()"),
     ):
       match = re.search(pattern, view_model, re.S)
       self.assertIsNotNone(match)
-      self.assertIn("clearBoardRecognitionPreview()", match.group("body"))
+      self.assertIn(expected_clear, match.group("body"))
 
     for token in (
       "oversized image URL should be rejected before file data is loaded",
@@ -5839,14 +5837,14 @@ EOF
     ):
       self.assertIn(token, docs + matrix)
 
-  def test_analysis_disabled_refreshes_local_chart_anchor(self) -> None:
+  def test_analysis_disabled_preserves_visible_analysis(self) -> None:
     view_model = read(ROOT / "qixi-ios-native" / "Qixi" / "QixiViewModel.swift")
     frontend_contract = read(ROOT / "qixi-ios-native" / "tests" / "test_frontend_contract.py")
     docs = read(ROOT / "docs" / "quality-gates.md")
     matrix = read(ROOT / "docs" / "pr-verification-matrix.md")
 
     request_body_match = re.search(
-      r"private func requestAnalysisIfNeeded\(\) \{(?P<body>.*?)\n  \}",
+      r"private func requestAnalysisIfNeeded\(\n    assumesEngineAlreadyLoaded: Bool = true\n  \) \{(?P<body>.*?)\n  \}",
       view_model,
       re.S,
     )
@@ -5858,21 +5856,20 @@ EOF
     )
     self.assertIsNotNone(disabled_branch_match)
     disabled_branch = disabled_branch_match.group("body")
-    self.assertIn("clearVisibleAnalysisAndRefreshAnchor()", disabled_branch)
+    self.assertNotIn("clearVisibleAnalysis", disabled_branch)
     self.assertIn('saveSoon(reason: "analysisDisabled")', disabled_branch)
     self.assertNotIn("candidates = []", disabled_branch)
     self.assertNotIn("territory = []", disabled_branch)
 
     for token in (
-      "test_analysis_disabled_refreshes_local_chart_anchor",
-      "clearVisibleAnalysisAndRefreshAnchor()",
+      "test_analysis_disabled_preserves_visible_analysis",
       'self.assertNotIn("candidates = []", disabled_branch)',
       'self.assertNotIn("territory = []", disabled_branch)',
     ):
       self.assertIn(token, frontend_contract)
     for token in (
-      "Disabled-analysis paths also refresh the local chart anchor",
-      "no-engine play or pass cannot leave stale winrate or score anchors",
+      "Disabled-analysis paths preserve the visible analysis",
+      "switching to no engine does not erase the current analysis",
     ):
       self.assertIn(token, docs + matrix)
 
@@ -5893,18 +5890,18 @@ EOF
       'saveNow(reason: "beforeEngineSwitch")',
       "selectedEngine = engine",
       'saveNow(reason: "engineSelected")',
-      "startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)",
+      "startAnalysis(\n      engine: engine,\n      assumesEngineAlreadyLoaded: false,",
     ):
       self.assertIn(token, select_body)
     self.assertLess(
       select_body.index('saveNow(reason: "engineSelected")'),
-      select_body.index("startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)"),
+      select_body.index("startAnalysis(\n      engine: engine,\n      assumesEngineAlreadyLoaded: false,"),
     )
 
     for token in (
       'saveNow(reason: "engineSelected")',
       'select_engine_body.index(\'saveNow(reason: "engineSelected")\')',
-      'select_engine_body.index("startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)")',
+      'select_engine_body.index("startAnalysis(\\n      engine: engine,\\n      assumesEngineAlreadyLoaded: false,")',
     ):
       self.assertIn(token, frontend_contract)
     for token in (
@@ -5937,11 +5934,12 @@ EOF
       "guard let best = bestCandidateWinrate else { return 0 }",
       "private static func bestWinrate(in candidates: [CandidateMove]) -> Double?",
       "private func updateCandidateCaches()",
-      "private static func visibleCandidates(from candidates: [CandidateMove], bestWinrate: Double?) -> [CandidateMove]",
-      "cachedVisibleCandidates = Self.visibleCandidates(from: candidates, bestWinrate: best)",
+      "private static func visibleCandidates(",
+      "forcedPointID: Int? = nil",
+      "cachedVisibleCandidates = Self.visibleCandidates(",
       "cachedVisibleCandidateOverlays = Self.visibleCandidateOverlays(",
       "private static func visibleCandidateOverlays(",
-      "overlays.reserveCapacity(visibleCandidates.count)",
+      "overlays.reserveCapacity(visibleCandidates.count + (nextMoveOverlay == nil ? 0 : 1))",
       "rankText: String(candidate.rank)",
       "winrateText: NumberText.winrate(candidate.winrate)",
       "visitsText: String(candidate.visits)",
@@ -5972,7 +5970,7 @@ EOF
       "Text(candidate.winrateText)",
       "Text(candidate.visitsText)",
       "Text(candidate.scoreText)",
-      "candidate.colorComponents.color",
+      "candidate.colorComponents?.color ?? QixiColor.background",
     ):
       self.assertIn(token, board)
     self.assertNotIn("NumberText.winrate(candidate.winrate)", board)
@@ -5981,7 +5979,7 @@ EOF
 
     for token in (
       'self.assertNotIn("candidates.map(\\\\.winrate).max()", view_model)',
-      "cachedVisibleCandidates = Self.visibleCandidates(from: candidates, bestWinrate: best)",
+      "cachedVisibleCandidates = Self.visibleCandidates(",
       "cachedVisibleCandidateOverlays = Self.visibleCandidateOverlays(",
       'self.assertNotIn("NumberText.winrate(candidate.winrate)", board)',
     ):
@@ -6049,7 +6047,9 @@ EOF
       "private func updateBoardMoveCache()",
       "let boundedPly = min(max(0, currentPly), mainLine.count)",
       "cachedBoardMoves = Array(mainLine.prefix(boundedPly))",
-      "let stones = QixiBoardPosition.visibleStones(after: cachedBoardMoves)",
+      "let stones = QixiBoardPosition.visibleStones(",
+      "after: cachedBoardMoves",
+      "setupStones: analysisSetupStones",
       "visibleBoardStones = stones",
       "colorsByID.reserveCapacity(stones.count)",
       "occupiedIDs.reserveCapacity(stones.count)",

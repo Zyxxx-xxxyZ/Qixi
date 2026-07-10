@@ -1,12 +1,18 @@
 #include "QixiNativeKataGoCore.hpp"
 
+#ifndef QIXI_ENABLE_NATIVE_KATAGO
+#define QIXI_ENABLE_NATIVE_KATAGO 0
+#endif
+
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <dirent.h>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <limits>
 #include <sstream>
@@ -19,6 +25,14 @@ namespace {
 
 constexpr size_t kNativeKataGoMaxTombstoneFileBytes = 256ULL * 1024ULL * 1024ULL;
 constexpr size_t kNativeKataGoFileReadChunkBytes = 64ULL * 1024ULL;
+
+#if QIXI_ENABLE_NATIVE_KATAGO
+constexpr const char* kNativeKataGoUnavailableMessage =
+  "Native KataGo adapter is unexpectedly unavailable.";
+#else
+constexpr const char* kNativeKataGoUnavailableMessage =
+  "Native KataGo is not linked into this build.";
+#endif
 
 NativeKataGoResult okResult(const std::string& message) {
   return {NativeKataGoStatusCode::ok, message, ""};
@@ -486,6 +500,632 @@ bool optionalIntegerFieldInRangeLooksValid(
   if(!parseJSONNonNegativeInteger(json, valueStart, valueEnd, maximum, value))
     return false;
   return value >= minimum;
+}
+
+bool parseJSONUnsignedInteger(
+  const std::string& json,
+  size_t start,
+  size_t end,
+  uint64_t maximum,
+  uint64_t& value
+) {
+  if(start >= end || !isJSONDigit(json[start]))
+    return false;
+  if(json[start] == '0' && end != start + 1)
+    return false;
+  uint64_t parsed = 0;
+  for(size_t offset = start; offset < end; ++offset) {
+    if(!isJSONDigit(json[offset]))
+      return false;
+    const uint64_t digit = static_cast<uint64_t>(json[offset] - '0');
+    if(parsed > (maximum - digit) / 10)
+      return false;
+    parsed = parsed * 10 + digit;
+  }
+  value = parsed;
+  return true;
+}
+
+bool parseJSONStringValue(
+  const std::string& json,
+  size_t start,
+  size_t end,
+  std::string& value
+) {
+  size_t stringEnd = 0;
+  if(!skipJSONString(json, start, stringEnd) || stringEnd != end)
+    return false;
+  value.clear();
+  for(size_t offset = start + 1; offset + 1 < end; ++offset) {
+    const char c = json[offset];
+    if(c != '\\') {
+      value.push_back(c);
+      continue;
+    }
+    offset += 1;
+    if(offset + 1 >= end)
+      return false;
+    switch(json[offset]) {
+    case '"': value.push_back('"'); break;
+    case '\\': value.push_back('\\'); break;
+    case '/': value.push_back('/'); break;
+    case 'b': value.push_back('\b'); break;
+    case 'f': value.push_back('\f'); break;
+    case 'n': value.push_back('\n'); break;
+    case 'r': value.push_back('\r'); break;
+    case 't': value.push_back('\t'); break;
+    case 'u':
+      // Qixi-owned request fields are ASCII. Preserve unsupported escapes as '?' instead
+      // of accepting a malformed JSON string silently.
+      if(offset + 4 >= end)
+        return false;
+      for(size_t i = offset + 1; i <= offset + 4; ++i) {
+        if(!isJSONHexDigit(json[i]))
+          return false;
+      }
+      value.push_back('?');
+      offset += 4;
+      break;
+    default:
+      return false;
+    }
+  }
+  return true;
+}
+
+bool optionalUnsignedIntegerField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  uint64_t maximum,
+  uint64_t& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  if(!findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd))
+    return true;
+  return parseJSONUnsignedInteger(json, valueStart, valueEnd, maximum, value);
+}
+
+bool requiredUnsignedIntegerField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  uint64_t maximum,
+  uint64_t& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  return findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd) &&
+    parseJSONUnsignedInteger(json, valueStart, valueEnd, maximum, value);
+}
+
+bool optionalNumberField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  double& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  if(!findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd))
+    return true;
+  return parseJSONFiniteNumber(json, valueStart, valueEnd, value);
+}
+
+bool optionalBooleanField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  bool& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  if(!findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd))
+    return true;
+  return valueIsJSONBool(json, valueStart, valueEnd, value);
+}
+
+bool optionalStringField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  std::string& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  if(!findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd))
+    return true;
+  return parseJSONStringValue(json, valueStart, valueEnd, value);
+}
+
+bool requiredStringField(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& key,
+  std::string& value
+) {
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  return findObjectKeyValue(json, objectStart, objectEnd, key, valueStart, valueEnd) &&
+    parseJSONStringValue(json, valueStart, valueEnd, value);
+}
+
+std::string jsonEscaped(const std::string& value) {
+  std::string escaped;
+  escaped.reserve(value.size() + 2);
+  for(char c : value) {
+    switch(c) {
+    case '"': escaped += "\\\""; break;
+    case '\\': escaped += "\\\\"; break;
+    case '\b': escaped += "\\b"; break;
+    case '\f': escaped += "\\f"; break;
+    case '\n': escaped += "\\n"; break;
+    case '\r': escaped += "\\r"; break;
+    case '\t': escaped += "\\t"; break;
+    default:
+      if(static_cast<unsigned char>(c) < 0x20)
+        escaped += "?";
+      else
+        escaped.push_back(c);
+      break;
+    }
+  }
+  return escaped;
+}
+
+const char* coreEngineStateName(core::EngineState state) {
+  switch(state) {
+  case core::EngineState::none: return "none";
+  case core::EngineState::loading: return "loading";
+  case core::EngineState::ready: return "ready";
+  case core::EngineState::offline: return "offline";
+  case core::EngineState::unloading: return "unloading";
+  }
+  return "offline";
+}
+
+const char* coreStoreStateName(core::StoreState state) {
+  switch(state) {
+  case core::StoreState::empty: return "empty";
+  case core::StoreState::loading: return "loading";
+  case core::StoreState::ready: return "ready";
+  case core::StoreState::saving: return "saving";
+  case core::StoreState::corrupted: return "corrupted";
+  }
+  return "corrupted";
+}
+
+bool parseCoreModelId(const std::string& value, core::ModelId& modelId) {
+  modelId = core::modelIdFromString(value);
+  return value == "none" || modelId != core::ModelId::none;
+}
+
+bool parseCoreColor(const std::string& value, core::Color& color) {
+  if(value == "black" || value == "B" || value == "b") {
+    color = core::Color::black;
+    return true;
+  }
+  if(value == "white" || value == "W" || value == "w") {
+    color = core::Color::white;
+    return true;
+  }
+  return false;
+}
+
+bool parseRequestSetupStonesArray(
+  const std::string& json,
+  size_t arrayStart,
+  size_t arrayEnd,
+  std::vector<NativeKataGoMove>& setupStones
+);
+
+bool parseCoreRootRef(
+  const std::string& json,
+  size_t objectStart,
+  size_t objectEnd,
+  const std::string& kindKey,
+  const std::string& valueKey,
+  const std::string& legacyNodeKey,
+  core::RootRef& reference
+) {
+  std::string kind = "node";
+  if(!optionalStringField(json, objectStart, objectEnd, kindKey, kind))
+    return false;
+  size_t valueStart = 0;
+  size_t valueEnd = 0;
+  const bool hasValue = findObjectKeyValue(json, objectStart, objectEnd, valueKey, valueStart, valueEnd);
+  uint64_t value = 0;
+  if(hasValue) {
+    if(!requiredUnsignedIntegerField(
+         json, objectStart, objectEnd, valueKey, std::numeric_limits<uint64_t>::max(), value
+       ))
+      return false;
+  }
+  else {
+    if(legacyNodeKey.empty() ||
+       !requiredUnsignedIntegerField(
+         json, objectStart, objectEnd, legacyNodeKey, std::numeric_limits<uint32_t>::max(), value
+       ))
+      return false;
+    kind = "node";
+  }
+  if(kind == "node") {
+    if(value > std::numeric_limits<uint32_t>::max())
+      return false;
+    reference = core::RootRef::nodeRef(static_cast<core::NodeId>(value));
+    return true;
+  }
+  if(kind == "intent") {
+    reference = core::RootRef::intentRef(static_cast<core::UiIntentId>(value));
+    return true;
+  }
+  if(kind == "lineage") {
+    reference = core::RootRef::lineageRef(value);
+    return true;
+  }
+  return false;
+}
+
+bool rootPayloadObject(
+  const std::string& json,
+  size_t rootStart,
+  size_t rootEnd,
+  size_t& payloadStart,
+  size_t& payloadEnd
+) {
+  if(!findObjectKeyValue(json, rootStart, rootEnd, "payload", payloadStart, payloadEnd)) {
+    payloadStart = rootStart;
+    payloadEnd = rootStart;
+    return true;
+  }
+  size_t objectEnd = 0;
+  return skipJSONObject(json, payloadStart, objectEnd) && objectEnd == payloadEnd;
+}
+
+NativeKataGoResult parseCoreFrontendRequestJSON(
+  const std::string& requestJSON,
+  core::RequestKind& kind,
+  core::RequestPayload& payload,
+  core::BackendEpoch& expectedEpoch
+) {
+  size_t rootEnd = 0;
+  if(!skipJSONObject(requestJSON, 0, rootEnd) ||
+     skipJSONWhitespace(requestJSON, rootEnd) != requestJSON.size())
+    return invalidRequestResult("Core request must be one JSON object.");
+
+  std::string kindString;
+  if(!requiredStringField(requestJSON, 0, rootEnd, "kind", kindString))
+    return invalidRequestResult("Core request kind must be a string.");
+
+  uint64_t epoch = 0;
+  if(!optionalUnsignedIntegerField(
+       requestJSON, 0, rootEnd, "expectedBackendEpoch", std::numeric_limits<uint64_t>::max(), epoch
+     ))
+    return invalidRequestResult("Core request expectedBackendEpoch must be an unsigned integer.");
+  expectedEpoch = static_cast<core::BackendEpoch>(epoch);
+
+  size_t payloadStart = 0;
+  size_t payloadEnd = 0;
+  if(!rootPayloadObject(requestJSON, 0, rootEnd, payloadStart, payloadEnd))
+    return invalidRequestResult("Core request payload must be an object when present.");
+  const bool hasPayload = payloadEnd > payloadStart;
+
+  if(kindString == "boot") {
+    core::BootRequest body;
+    if(hasPayload &&
+       (!optionalBooleanField(requestJSON, payloadStart, payloadEnd, "loadLastState", body.loadLastState) ||
+        !optionalBooleanField(requestJSON, payloadStart, payloadEnd, "firstLaunch", body.firstLaunch)))
+      return invalidRequestResult("Core boot payload has invalid booleans.");
+    kind = core::RequestKind::boot;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "selectEngine") {
+    std::string model = "none";
+    if(!hasPayload || !requiredStringField(requestJSON, payloadStart, payloadEnd, "modelId", model))
+      return invalidRequestResult("Core selectEngine requires payload.modelId.");
+    core::SelectEngineRequest body;
+    if(!parseCoreModelId(model, body.modelId))
+      return invalidRequestResult("Core selectEngine modelId is unsupported.");
+    kind = core::RequestKind::selectEngine;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "setKomi") {
+    double komi = 7.5;
+    if(!hasPayload || !optionalNumberField(requestJSON, payloadStart, payloadEnd, "komi", komi))
+      return invalidRequestResult("Core setKomi requires finite payload.komi.");
+    core::SetKomiRequest body;
+    body.komi = static_cast<float>(komi);
+    kind = core::RequestKind::setKomi;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "setWideRootNoise") {
+    double noise = 0.0;
+    if(!hasPayload || !optionalNumberField(requestJSON, payloadStart, payloadEnd, "noise", noise))
+      return invalidRequestResult("Core setWideRootNoise requires finite payload.noise.");
+    core::SetWideRootNoiseRequest body;
+    body.noise = static_cast<float>(std::max(0.0, noise));
+    kind = core::RequestKind::setWideRootNoise;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "newGame") {
+    core::NewGameRequest body;
+    double komi = body.rules.komi;
+    std::string nextPla = "black";
+    if(hasPayload) {
+      if(!optionalNumberField(requestJSON, payloadStart, payloadEnd, "komi", komi) ||
+         !optionalStringField(requestJSON, payloadStart, payloadEnd, "nextPla", nextPla))
+        return invalidRequestResult("Core newGame payload is invalid.");
+    }
+    body.rules.komi = static_cast<float>(komi);
+    if(!parseCoreColor(nextPla, body.nextPla))
+      return invalidRequestResult("Core newGame nextPla is invalid.");
+    kind = core::RequestKind::newGame;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "playMove") {
+    if(!hasPayload)
+      return invalidRequestResult("Core playMove requires a payload.");
+    core::PlayMoveRequest body;
+    uint64_t move = core::kMovePass;
+    uint64_t uiIntentId = 0;
+    if(!requiredUnsignedIntegerField(requestJSON, payloadStart, payloadEnd, "move", core::kMovePass, move) ||
+       !optionalUnsignedIntegerField(requestJSON, payloadStart, payloadEnd, "uiIntentId", std::numeric_limits<uint64_t>::max(), uiIntentId) ||
+       !parseCoreRootRef(
+         requestJSON,
+         payloadStart,
+         payloadEnd,
+         "parentRootKind",
+         "parentRootValue",
+         "parentRootId",
+         body.parentRootRef
+       ))
+      return invalidRequestResult("Core playMove payload fields are invalid.");
+    body.move = static_cast<core::Move>(move);
+    body.uiIntentId = static_cast<core::UiIntentId>(uiIntentId);
+    kind = core::RequestKind::playMove;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "undo" || kindString == "redo") {
+    core::StepRequest body;
+    uint64_t steps = 1;
+    if(hasPayload &&
+       !optionalUnsignedIntegerField(requestJSON, payloadStart, payloadEnd, "steps", 512, steps))
+      return invalidRequestResult("Core step payload.steps is invalid.");
+    body.steps = static_cast<uint32_t>(steps);
+    kind = kindString == "undo" ? core::RequestKind::undo : core::RequestKind::redo;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "jumpToNode" || kindString == "jumpToLinePoint") {
+    if(!hasPayload)
+      return invalidRequestResult("Core jump request requires a payload.");
+    core::JumpToNodeRequest body;
+    if(!parseCoreRootRef(
+         requestJSON,
+         payloadStart,
+         payloadEnd,
+         "targetRootKind",
+         "targetRootValue",
+         "node",
+         body.targetRootRef
+       ))
+      return invalidRequestResult("Core jump payload.node is invalid.");
+    kind = kindString == "jumpToNode" ? core::RequestKind::jumpToNode : core::RequestKind::jumpToLinePoint;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "setTerritoryMode") {
+    core::SetTerritoryModeRequest body;
+    if(hasPayload && !optionalBooleanField(requestJSON, payloadStart, payloadEnd, "enabled", body.enabled))
+      return invalidRequestResult("Core setTerritoryMode payload.enabled is invalid.");
+    kind = core::RequestKind::setTerritoryMode;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "exportAnalysisState" || kindString == "importAnalysisState") {
+    std::string path;
+    if(!hasPayload || !requiredStringField(requestJSON, payloadStart, payloadEnd, "path", path) || path.empty())
+      return invalidRequestResult("Core state import/export requires payload.path.");
+    if(kindString == "exportAnalysisState") {
+      core::ExportAnalysisStateRequest body;
+      body.path = path;
+      kind = core::RequestKind::exportAnalysisState;
+      payload = body;
+    }
+    else {
+      core::ImportAnalysisStateRequest body;
+      body.path = path;
+      kind = core::RequestKind::importAnalysisState;
+      payload = body;
+    }
+    return okResult("core request parsed");
+  }
+  if(kindString == "enterBackground") {
+    core::EnterBackgroundRequest body;
+    uint64_t deadlineMs = 0;
+    if(hasPayload &&
+       !optionalUnsignedIntegerField(requestJSON, payloadStart, payloadEnd, "deadlineMs", std::numeric_limits<uint32_t>::max(), deadlineMs))
+      return invalidRequestResult("Core enterBackground payload.deadlineMs is invalid.");
+    body.deadlineMs = static_cast<uint32_t>(deadlineMs);
+    kind = core::RequestKind::enterBackground;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "enterForeground") {
+    kind = core::RequestKind::enterForeground;
+    payload = core::EnterForegroundRequest{};
+    return okResult("core request parsed");
+  }
+  if(kindString == "autosaveTick") {
+    core::AutosaveTickRequest body;
+    if(hasPayload && !optionalStringField(requestJSON, payloadStart, payloadEnd, "reason", body.reason))
+      return invalidRequestResult("Core autosaveTick payload.reason is invalid.");
+    kind = core::RequestKind::autosaveTick;
+    payload = body;
+    return okResult("core request parsed");
+  }
+  if(kindString == "applyRecognizedBoard") {
+    if(!hasPayload)
+      return invalidRequestResult("Core applyRecognizedBoard requires a payload.");
+    std::string nextPlaText = "black";
+    if(!optionalStringField(requestJSON, payloadStart, payloadEnd, "nextPla", nextPlaText))
+      return invalidRequestResult("Core applyRecognizedBoard nextPla is invalid.");
+    core::Color nextPla = core::Color::black;
+    if(!parseCoreColor(nextPlaText, nextPla))
+      return invalidRequestResult("Core applyRecognizedBoard nextPla is invalid.");
+    size_t setupStart = 0;
+    size_t setupEnd = 0;
+    if(!findObjectKeyValue(requestJSON, payloadStart, payloadEnd, "setupStones", setupStart, setupEnd))
+      return invalidRequestResult("Core applyRecognizedBoard requires setupStones.");
+    std::vector<NativeKataGoMove> setupStones;
+    if(!parseRequestSetupStonesArray(requestJSON, setupStart, setupEnd, setupStones))
+      return invalidRequestResult("Core applyRecognizedBoard setupStones are invalid.");
+    core::ApplyRecognizedBoardRequest body;
+    body.board = core::BoardLogic::emptyBoard(nextPla);
+    std::array<uint8_t, core::kBoardArea> occupied{};
+    for(const NativeKataGoMove& stone : setupStones) {
+      const core::Move move = core::pointToMove(stone.x, stone.y);
+      if(occupied[move])
+        return invalidRequestResult("Core applyRecognizedBoard contains duplicate setup points.");
+      occupied[move] = 1;
+      body.board.cells[move] = stone.color == NativeKataGoMoveColor::black
+        ? core::Color::black
+        : core::Color::white;
+    }
+    body.board.boardHashHistory.assign(1, core::BoardLogic::boardHash(body.board));
+    body.board.situationHashHistory.assign(1, core::BoardLogic::situationHash(body.board));
+    body.sideToMove = nextPla;
+    kind = core::RequestKind::applyRecognizedBoard;
+    payload = std::move(body);
+    return okResult("core request parsed");
+  }
+  return invalidRequestResult("Core request kind is unsupported: " + kindString);
+}
+
+void appendMoveFieldsJSON(std::ostream& out, core::Move move) {
+  out << "\"move\":" << static_cast<uint32_t>(move);
+  if(move == core::kMovePass) {
+    out << ",\"pass\":true,\"x\":-1,\"y\":-1";
+    return;
+  }
+  const core::Point point = core::moveToPoint(move);
+  out << ",\"pass\":false,\"x\":" << point.x << ",\"y\":" << point.y;
+}
+
+void appendCoreSnapshotJSON(std::ostream& out, const core::RootSnapshot& snapshot) {
+  out << "{";
+  out << "\"root\":" << snapshot.root;
+  out << ",\"rootLineageHash\":" << snapshot.rootLineageHash;
+  out << ",\"rootVisits\":" << snapshot.rootVisits;
+  out << ",\"rootWinrate\":" << snapshot.rootWinrate;
+  out << ",\"rootScoreMean\":" << snapshot.rootScoreMean;
+  out << ",\"hasOwnership\":" << (snapshot.hasOwnership ? "true" : "false");
+  out << ",\"candidates\":[";
+  for(size_t i = 0; i < snapshot.candidates.size(); ++i) {
+    if(i > 0)
+      out << ",";
+    const auto& candidate = snapshot.candidates[i];
+    out << "{";
+    appendMoveFieldsJSON(out, candidate.move);
+    out << ",\"visits\":" << candidate.visits;
+    out << ",\"prior\":" << candidate.prior;
+    out << ",\"winrate\":" << candidate.winrate;
+    out << ",\"scoreMean\":" << candidate.scoreMean;
+    out << ",\"utility\":" << candidate.utility;
+    out << "}";
+  }
+  out << "],\"visibleTree\":[";
+  for(size_t i = 0; i < snapshot.visibleTree.size(); ++i) {
+    if(i > 0)
+      out << ",";
+    const auto& node = snapshot.visibleTree[i];
+    out << "{";
+    out << "\"id\":" << node.id;
+    out << ",\"lineageHash\":" << node.lineageHash;
+    if(node.parent == core::kInvalidNode)
+      out << ",\"parent\":null";
+    else
+      out << ",\"parent\":" << node.parent;
+    out << ",\"moveFromParent\":" << static_cast<uint32_t>(node.moveFromParent);
+    out << ",\"moveColor\":\"";
+    if(node.movePla == core::Color::black)
+      out << "black";
+    else if(node.movePla == core::Color::white)
+      out << "white";
+    else
+      out << "none";
+    out << "\"";
+    out << ",\"ply\":" << node.ply;
+    out << ",\"visits\":" << node.visits;
+    out << ",\"winrate\":" << node.winrate;
+    out << ",\"scoreMean\":" << node.scoreMean;
+    out << ",\"analyzed\":" << (node.analyzed ? "true" : "false");
+    if(node.hasQualityDelta)
+      out << ",\"qualityDeltaPercent\":" << node.qualityDeltaPercent;
+    else
+      out << ",\"qualityDeltaPercent\":null";
+    out << "}";
+  }
+  out << "]";
+  out << ",\"ownership\":[";
+  if(snapshot.hasOwnership) {
+    for(size_t i = 0; i < snapshot.ownership.size(); ++i) {
+      if(i > 0)
+        out << ",";
+      out << snapshot.ownership[i];
+    }
+  }
+  out << "]}";
+}
+
+std::string coreBackendResultJSON(const core::BackendResult& result) {
+  std::ostringstream out;
+  out << std::setprecision(9);
+  out << "{";
+  out << "\"requestId\":" << result.requestId;
+  out << ",\"backendEpoch\":" << result.backendEpoch;
+  out << ",\"revision\":" << result.revision;
+  out << ",\"ok\":" << (result.ok ? "true" : "false");
+  out << ",\"message\":\"" << jsonEscaped(result.message) << "\"";
+  out << ",\"currentRoot\":" << result.currentRoot;
+  out << ",\"engineState\":\"" << coreEngineStateName(result.engineState) << "\"";
+  out << ",\"storeState\":\"" << coreStoreStateName(result.storeState) << "\"";
+  if(result.hasCommittedUiIntent)
+    out << ",\"committedUiIntentId\":" << result.committedUiIntentId;
+  else
+    out << ",\"committedUiIntentId\":null";
+  out << ",\"snapshot\":";
+  if(result.snapshot)
+    appendCoreSnapshotJSON(out, *result.snapshot);
+  else
+    out << "null";
+  out << "}";
+  return out.str();
+}
+
+std::string coreLegalMoveMaskJSON(const std::array<bool, core::kMoveCount>& mask) {
+  std::ostringstream out;
+  out << "{\"legal\":[";
+  for(size_t i = 0; i < mask.size(); ++i) {
+    if(i > 0)
+      out << ",";
+    out << (mask[i] ? "true" : "false");
+  }
+  out << "]}";
+  return out.str();
 }
 
 bool validateMoveObject(
@@ -1371,10 +2011,29 @@ NativeKataGoCore::NativeKataGoCore()
 
 NativeKataGoCore::NativeKataGoCore(std::unique_ptr<NativeKataGoEngine> engine)
   : engine(std::move(engine)) {
+  coreBackend.setEngineSelector(
+    [this](core::ModelId modelId, core::Evaluator*& evaluator, std::string& error) {
+      return selectCoreEngine(modelId, evaluator, error);
+    }
+  );
+  coreBackend.start();
+}
+
+NativeKataGoCore::~NativeKataGoCore() {
+  coreBackend.stop();
+  if(engine)
+    engine->unloadModel();
 }
 
 bool NativeKataGoCore::isLinked() const {
   return engine != nullptr && engine->isLinked();
+}
+
+NativeKataGoResult NativeKataGoCore::configureCoreStoreDirectory(const std::string& path) {
+  std::string error;
+  if(!coreBackend.setStoreDirectory(path, &error))
+    return invalidRequestResult(error);
+  return okResult("core store directory configured");
 }
 
 NativeKataGoResult NativeKataGoCore::configureModel(const NativeKataGoModelConfig& config) {
@@ -1405,30 +2064,109 @@ NativeKataGoResult NativeKataGoCore::configureModel(const NativeKataGoModelConfi
 NativeKataGoResult NativeKataGoCore::loadEngine(const std::string& engineID) {
   if(engineID.empty())
     return invalidRequestResult("Native KataGo engine id must not be empty.");
-  if(engineID == "none") {
-    loadedEngineID = "none";
-    if(engine != nullptr) {
-      NativeKataGoResult unloadResult = engine->unloadModel();
-      if(!unloadResult.ok())
-        return unloadResult;
-    }
-    return okResult("no engine loaded");
-  }
-  if(!supportedEngineID(engineID))
+  if(engineID != "none" && !supportedEngineID(engineID))
     return invalidRequestResult("Native KataGo engine id is not supported.");
-  loadedEngineID = "none";
-  if(engine == nullptr)
-    return invalidRequestResult("Native KataGo engine adapter is missing.");
-  NativeKataGoResult unloadResult = engine->unloadModel();
-  if(!unloadResult.ok())
-    return unloadResult;
-  auto config = modelConfigs.find(engineID);
-  if(config == modelConfigs.end())
+  if(engineID != "none" && modelConfigs.find(engineID) == modelConfigs.end())
     return invalidRequestResult("Native KataGo model config missing for engine.");
-  NativeKataGoResult result = engine->loadModel(config->second);
-  if(result.ok())
-    loadedEngineID = engineID;
-  return result;
+  if(engineID != "none" && !isLinked()) {
+    return {
+      NativeKataGoStatusCode::libraryNotLinked,
+      kNativeKataGoUnavailableMessage,
+      "",
+    };
+  }
+  core::SelectEngineRequest payload;
+  if(!parseCoreModelId(engineID, payload.modelId))
+    return invalidRequestResult("Native KataGo engine id cannot be mapped to a core model id.");
+  const core::BackendResult result = coreBackend.submitAndWait(
+    core::RequestKind::selectEngine,
+    payload,
+    0
+  );
+  if(!result.ok)
+    return invalidRequestResult(result.message);
+  return {
+    NativeKataGoStatusCode::ok,
+    engineID == "none" ? "no engine loaded" : "Native KataGo model loaded.",
+    coreBackendResultJSON(result),
+  };
+}
+
+bool NativeKataGoCore::selectCoreEngine(
+  core::ModelId modelId,
+  core::Evaluator*& evaluator,
+  std::string& error
+) {
+  evaluator = nullptr;
+  const std::string engineID = core::modelIdToString(modelId);
+  if(!engine) {
+    error = "Native KataGo engine adapter is missing.";
+    loadedEngineID = "none";
+    return false;
+  }
+  const std::string previousEngineID = loadedEngineID;
+  NativeKataGoModelConfig previousConfig{};
+  bool hasPreviousConfig = false;
+  if(previousEngineID != "none") {
+    const auto previous = modelConfigs.find(previousEngineID);
+    if(previous != modelConfigs.end()) {
+      previousConfig = previous->second;
+      hasPreviousConfig = true;
+    }
+  }
+  const auto targetConfig = modelConfigs.find(engineID);
+  if(modelId != core::ModelId::none && targetConfig == modelConfigs.end()) {
+    evaluator = engine->coreEvaluator();
+    error = "Native KataGo model config missing for engine.";
+    return false;
+  }
+
+  auto restorePreviousModel = [&]() -> bool {
+    if(!hasPreviousConfig)
+      return false;
+    const NativeKataGoResult restoreResult = engine->loadModel(previousConfig);
+    if(!restoreResult.ok()) {
+      error += "; previous model restore failed: " + restoreResult.message;
+      return false;
+    }
+    evaluator = engine->coreEvaluator();
+    if(evaluator == nullptr) {
+      engine->unloadModel();
+      error += "; previous model restored without a core evaluator";
+      return false;
+    }
+    loadedEngineID = previousEngineID;
+    error += "; previous model restored";
+    return true;
+  };
+
+  NativeKataGoResult unloadResult = engine->unloadModel();
+  if(!unloadResult.ok()) {
+    error = unloadResult.message;
+    evaluator = engine->coreEvaluator();
+    if(evaluator == nullptr)
+      loadedEngineID = "none";
+    return false;
+  }
+  loadedEngineID = "none";
+  if(modelId == core::ModelId::none)
+    return true;
+  NativeKataGoResult loadResult = engine->loadModel(targetConfig->second);
+  if(!loadResult.ok()) {
+    error = loadResult.message;
+    engine->unloadModel();
+    restorePreviousModel();
+    return false;
+  }
+  evaluator = engine->coreEvaluator();
+  if(evaluator == nullptr) {
+    engine->unloadModel();
+    error = "Native KataGo model loaded without a core evaluator.";
+    restorePreviousModel();
+    return false;
+  }
+  loadedEngineID = engineID;
+  return true;
 }
 
 NativeKataGoResult NativeKataGoCore::analyzeRequestJSON(const std::string& requestJSON) {
@@ -1486,6 +2224,60 @@ NativeKataGoResult NativeKataGoCore::restoreTombstoneFromFile(const std::string&
   if(!result.ok())
     clearLoadedEngineAfterTombstoneRestoreFailure(engine.get(), loadedEngineID);
   return result;
+}
+
+NativeKataGoResult NativeKataGoCore::submitCoreRequestLocked(
+  core::RequestKind kind,
+  core::RequestPayload payload,
+  core::BackendEpoch expectedEpoch
+) {
+  const core::BackendResult result = coreBackend.submitAndWait(kind, std::move(payload), expectedEpoch);
+  return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
+}
+
+NativeKataGoResult NativeKataGoCore::submitCoreRequestJSON(const std::string& requestJSON) {
+  core::RequestKind kind = core::RequestKind::boot;
+  core::RequestPayload payload = core::BootRequest{};
+  core::BackendEpoch expectedEpoch = 0;
+  NativeKataGoResult parseResult = parseCoreFrontendRequestJSON(requestJSON, kind, payload, expectedEpoch);
+  if(!parseResult.ok())
+    return parseResult;
+  return submitCoreRequestLocked(kind, std::move(payload), expectedEpoch);
+}
+
+NativeKataGoResult NativeKataGoCore::latestCoreSnapshotJSON() {
+  const core::BackendResult result = coreBackend.latestSnapshot();
+  return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
+}
+
+NativeKataGoResult NativeKataGoCore::legalMoveMaskJSON() {
+  return {
+    NativeKataGoStatusCode::ok,
+    "legal move mask copied",
+    coreLegalMoveMaskJSON(coreBackend.legalMoveMask()),
+  };
+}
+
+NativeKataGoResult NativeKataGoCore::exportCoreStateToFile(const std::string& filePath) {
+  if(filePath.empty())
+    return invalidRequestResult("Core MCTS export file path must not be empty.");
+  core::ExportAnalysisStateRequest payload;
+  payload.path = filePath;
+  const core::BackendResult result = coreBackend.submitAndWait(core::RequestKind::exportAnalysisState, payload, 0);
+  if(!result.ok)
+    return invalidRequestResult(result.message);
+  return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
+}
+
+NativeKataGoResult NativeKataGoCore::importCoreStateFromFile(const std::string& filePath) {
+  if(filePath.empty())
+    return invalidRequestResult("Core MCTS import file path must not be empty.");
+  core::ImportAnalysisStateRequest payload;
+  payload.path = filePath;
+  const core::BackendResult result = coreBackend.submitAndWait(core::RequestKind::importAnalysisState, payload, 0);
+  if(!result.ok)
+    return invalidRequestResult(result.message);
+  return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
 }
 
 }  // namespace qixi

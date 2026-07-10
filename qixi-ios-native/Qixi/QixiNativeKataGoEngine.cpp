@@ -20,6 +20,9 @@
 #include "program/setup.h"
 #include "search/asyncbot.h"
 #include "search/search.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -301,7 +304,7 @@ std::map<std::string, std::string> qixiNativeKataGoConfigMap(const NativeKataGoM
     {"maxVisits", "64"},
     {"numSearchThreads", "1"},
     {"nnMaxBatchSize", "16"},
-    {"nnCacheSizePowerOfTwo", "19"},
+    {"nnCacheSizePowerOfTwo", "-1"},
     {"nnMutexPoolSizePowerOfTwo", "16"},
     {"nnRandomize", "false"},
     {"nnRandSeed", "qixi-native"},
@@ -440,6 +443,40 @@ Rules qixiToKataGoRules(const NativeKataGoRules& qixiRules, double komi) {
     qixiToKataGoWhiteHandicapBonusRule(qixiRules.whiteHandicapBonusRule),
     qixiRules.friendlyPassOk,
     static_cast<float>(komi)
+  );
+}
+
+Rules qixiCoreRulesToKataGoRules(const core::Rules& qixiRules) {
+  int koRule = Rules::KO_SIMPLE;
+  switch(qixiRules.koRule) {
+  case core::KoRule::simple: koRule = Rules::KO_SIMPLE; break;
+  case core::KoRule::positional: koRule = Rules::KO_POSITIONAL; break;
+  case core::KoRule::situational: koRule = Rules::KO_SITUATIONAL; break;
+  }
+  const int scoringRule = qixiRules.scoringRule == core::ScoringRule::area
+    ? Rules::SCORING_AREA
+    : Rules::SCORING_TERRITORY;
+  int taxRule = Rules::TAX_NONE;
+  switch(qixiRules.taxRule) {
+  case core::TaxRule::none: taxRule = Rules::TAX_NONE; break;
+  case core::TaxRule::seki: taxRule = Rules::TAX_SEKI; break;
+  case core::TaxRule::all: taxRule = Rules::TAX_ALL; break;
+  }
+  int whiteHandicapBonusRule = Rules::WHB_N;
+  switch(qixiRules.whiteHandicapBonusRule) {
+  case core::WhiteHandicapBonusRule::zero: whiteHandicapBonusRule = Rules::WHB_ZERO; break;
+  case core::WhiteHandicapBonusRule::n: whiteHandicapBonusRule = Rules::WHB_N; break;
+  case core::WhiteHandicapBonusRule::nMinusOne: whiteHandicapBonusRule = Rules::WHB_N_MINUS_ONE; break;
+  }
+  return Rules(
+    koRule,
+    scoringRule,
+    taxRule,
+    qixiRules.multiStoneSuicideLegal,
+    qixiRules.hasButton,
+    whiteHandicapBonusRule,
+    qixiRules.friendlyPassOk,
+    qixiRules.komi
   );
 }
 
@@ -619,6 +656,160 @@ std::string qixiBuildAnalysisResponseJSON(
   );
 }
 
+Player qixiCorePlayer(core::Color color) {
+  return color == core::Color::white ? P_WHITE : P_BLACK;
+}
+
+Loc qixiCoreMoveLoc(core::Move move) {
+  if(move == core::kMovePass)
+    return Board::PASS_LOC;
+  const core::Point point = core::moveToPoint(move);
+  return Location::getLoc(point.x, point.y, 19);
+}
+
+bool qixiBuildKataGoPositionFromCore(
+  const core::BoardState& state,
+  const core::Rules& coreRules,
+  Board& board,
+  BoardHistory& history,
+  Player& nextPlayer
+) {
+  std::array<core::Color, core::kBoardArea> initialCells = state.cells;
+  for(auto it = state.moves.rbegin(); it != state.moves.rend(); ++it) {
+    const core::MoveRecord& record = *it;
+    if(record.move == core::kMovePass)
+      continue;
+    initialCells[record.move] = core::Color::empty;
+    for(core::Move stone : record.removedOwn) {
+      if(stone != record.move)
+        initialCells[stone] = record.pla;
+    }
+    for(core::Move stone : record.captured)
+      initialCells[stone] = core::opposite(record.pla);
+  }
+
+  Board initialBoard(19, 19);
+  std::vector<Move> placements;
+  for(core::Move move = 0; move < core::kBoardArea; ++move) {
+    if(initialCells[move] == core::Color::empty)
+      continue;
+    placements.emplace_back(qixiCoreMoveLoc(move), qixiCorePlayer(initialCells[move]));
+  }
+  if(!placements.empty() && !initialBoard.setStonesFailIfNoLibs(placements))
+    return false;
+
+  const Rules rules = qixiCoreRulesToKataGoRules(coreRules);
+  const Player initialPlayer = state.moves.empty()
+    ? qixiCorePlayer(state.nextPla)
+    : qixiCorePlayer(state.moves.front().pla);
+  BoardHistory rebuiltHistory(initialBoard, initialPlayer, rules, 0);
+  rebuiltHistory.setAssumeMultipleStartingBlackMovesAreHandicap(false);
+  Board rebuiltBoard = initialBoard;
+  for(const core::MoveRecord& record : state.moves) {
+    if(!rebuiltHistory.makeBoardMoveTolerant(
+         rebuiltBoard,
+         qixiCoreMoveLoc(record.move),
+         qixiCorePlayer(record.pla),
+         false
+       ))
+      return false;
+  }
+
+  for(core::Move move = 0; move < core::kBoardArea; ++move) {
+    const Player expected = state.cells[move] == core::Color::empty
+      ? C_EMPTY
+      : qixiCorePlayer(state.cells[move]);
+    if(rebuiltBoard.colors[qixiCoreMoveLoc(move)] != expected)
+      return false;
+  }
+  board = rebuiltBoard;
+  history = rebuiltHistory;
+  nextPlayer = qixiCorePlayer(state.nextPla);
+  return true;
+}
+
+class LinkedCoreEvaluator final : public core::Evaluator {
+public:
+  void configure(NNEvaluator* value, const SearchParams* paramsValue) {
+    nnEval = value;
+    searchParams = paramsValue;
+  }
+
+  bool available() const {
+    return nnEval != nullptr && searchParams != nullptr;
+  }
+
+  bool evaluate(
+    const core::BoardState& state,
+    const core::Rules& rules,
+    bool isRoot,
+    core::LeafPayload& output
+  ) override {
+    if(!available())
+      return false;
+    Board board(19, 19);
+    BoardHistory history;
+    Player nextPlayer = P_BLACK;
+    if(!qixiBuildKataGoPositionFromCore(state, rules, board, history, nextPlayer))
+      return false;
+
+    MiscNNInputParams inputParams;
+    inputParams.drawEquivalentWinsForWhite = searchParams->drawEquivalentWinsForWhite;
+    inputParams.conservativePassAndIsRoot = searchParams->conservativePass && isRoot;
+    inputParams.enablePassingHacks = searchParams->enablePassingHacks;
+    inputParams.nnPolicyTemperature = searchParams->nnPolicyTemperature;
+    inputParams.policyOptimism = isRoot ? searchParams->rootPolicyOptimism : searchParams->policyOptimism;
+    inputParams.maxHistory = core::kMaxNNHistory;
+    nnEval->evaluate(board, history, nextPlayer, inputParams, resultBuf, true, true);
+    if(!resultBuf.hasResult || !resultBuf.result)
+      return false;
+    const NNOutput& nn = *resultBuf.result;
+
+    output = core::LeafPayload{};
+    output.winLossWhite = nn.whiteWinProb - nn.whiteLossProb;
+    output.noResult = nn.whiteNoResultProb;
+    output.scoreMeanWhite = nn.whiteScoreMean;
+    output.scoreMeanSqWhite = nn.whiteScoreMeanSq;
+    output.leadWhite = nn.whiteLead;
+    const double scoreStdev = ScoreValue::getScoreStdev(nn.whiteScoreMean, nn.whiteScoreMeanSq);
+    const double staticScoreValue = ScoreValue::expectedWhiteScoreValue(
+      nn.whiteScoreMean, scoreStdev, 0.0, 2.0, board.sqrtBoardArea()
+    );
+    const double dynamicScoreValue = ScoreValue::expectedWhiteScoreValue(
+      nn.whiteScoreMean,
+      scoreStdev,
+      0.0,
+      searchParams->dynamicScoreCenterScale,
+      board.sqrtBoardArea()
+    );
+    output.utilityWhite = static_cast<float>(
+      output.winLossWhite * searchParams->winLossUtilityFactor +
+      output.noResult * searchParams->noResultUtilityForWhite +
+      staticScoreValue * searchParams->staticScoreUtilityFactor +
+      dynamicScoreValue * searchParams->dynamicScoreUtilityFactor
+    );
+    output.policy.fill(-1.0f);
+    for(core::Move move = 0; move < core::kMoveCount; ++move) {
+      const int pos = NNPos::locToPos(qixiCoreMoveLoc(move), 19, nn.nnXLen, nn.nnYLen);
+      output.policy[move] = nn.policyProbs[pos];
+    }
+    if(nn.whiteOwnerMap == nullptr)
+      return false;
+    for(core::Move move = 0; move < core::kBoardArea; ++move) {
+      const core::Point point = core::moveToPoint(move);
+      const int pos = NNPos::xyToPos(point.x, point.y, nn.nnXLen);
+      output.ownership[move] = nn.whiteOwnerMap[pos];
+    }
+    output.weight = 1.0f;
+    return true;
+  }
+
+private:
+  NNEvaluator* nnEval = nullptr;
+  const SearchParams* searchParams = nullptr;
+  NNResultBuf resultBuf;
+};
+
 class LinkedNativeKataGoEngine final : public NativeKataGoEngine {
 public:
   bool isLinked() const override {
@@ -626,6 +817,7 @@ public:
   }
 
   NativeKataGoResult unloadModel() override {
+    coreEvaluatorImpl.configure(nullptr, nullptr);
     bot.reset();
     nnEval.reset();
     loadedEngineID.clear();
@@ -640,6 +832,13 @@ public:
       return nativeInvalidRequestResult("Native KataGo model config is missing engineID.");
     if(config.modelPath.empty())
       return nativeInvalidRequestResult("Native KataGo model config is missing modelPath.");
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+    // MPSGraph can raise an uncaught Objective-C exception while constructing its
+    // Metal device on iOS Simulator. Real Metal-mux inference is a device-only gate.
+    return nativeInvalidRequestResult(
+      "Metal mux model inference is unavailable in iOS Simulator; use a physical iPhone or iPad."
+    );
+#endif
 
     try {
       qixiInitializeKataGoProcessOnce();
@@ -681,6 +880,7 @@ public:
       loadedConfig = config;
       loadedEngineID = config.engineID;
       lastRootKeyMaterial.clear();
+      coreEvaluatorImpl.configure(nnEval.get(), &baseParams);
       return nativeOKResult("Native KataGo model loaded.");
     }
     catch(const std::exception& ex) {
@@ -774,6 +974,10 @@ public:
     }
   }
 
+  core::Evaluator* coreEvaluator() override {
+    return coreEvaluatorImpl.available() ? &coreEvaluatorImpl : nullptr;
+  }
+
 private:
   std::string loadedEngineID;
   NativeKataGoModelConfig loadedConfig;
@@ -784,6 +988,7 @@ private:
   std::unique_ptr<Logger> logger;
   std::unique_ptr<NNEvaluator> nnEval;
   std::unique_ptr<AsyncBot> bot;
+  LinkedCoreEvaluator coreEvaluatorImpl;
 };
 
 #endif
@@ -817,6 +1022,10 @@ public:
 
   NativeKataGoResult restoreTombstoneFromFile(const std::string&) override {
     return libraryNotLinkedResult();
+  }
+
+  core::Evaluator* coreEvaluator() override {
+    return nullptr;
   }
 };
 #endif

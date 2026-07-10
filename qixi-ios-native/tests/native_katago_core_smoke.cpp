@@ -312,6 +312,13 @@ public:
     }
     return {qixi::NativeKataGoStatusCode::ok, "fake tombstone restored", ""};
   }
+
+  qixi::core::Evaluator* coreEvaluator() override {
+    return loadedConfig.engineID.empty() ? nullptr : &evaluator;
+  }
+
+private:
+  qixi::core::UniformEvaluator evaluator;
 };
 
 }  // namespace
@@ -852,12 +859,12 @@ int main() {
     failingUnloadCore.analyzeRequestJSON(emptyAnalysisRequestJSON());
   expect(
     analysisAfterFailedUnloadSwitch.ok() &&
-      analysisAfterFailedUnloadSwitch.responseJSON.find(R"("engine":"none")") != std::string::npos,
-    "failed adapter unload clears loaded engine before any later analysis"
+      analysisAfterFailedUnloadSwitch.responseJSON.find(R"("engine":"b6")") != std::string::npos,
+    "failed adapter unload keeps the still-loaded committed engine available"
   );
   expect(
-    failingUnloadEnginePtr->analyzeCalls == 0,
-    "analysis after adapter unload failure must not call the stale adapter model"
+    failingUnloadEnginePtr->analyzeCalls == 1,
+    "analysis after adapter unload failure calls the still-loaded committed model"
   );
 
   auto fakeEngine = std::make_unique<FakeNativeKataGoEngine>();
@@ -1178,27 +1185,27 @@ int main() {
     "linked core surfaces missing config while switching engines"
   );
   expect(
-    fakeEnginePtr->unloadModelCalls == unloadsBeforeMissingConfigSwitch + 1,
-    "missing-config engine switch unloads the previously loaded adapter model"
+    fakeEnginePtr->unloadModelCalls == unloadsBeforeMissingConfigSwitch,
+    "missing-config engine switch is rejected before touching the loaded adapter model"
   );
   qixi::NativeKataGoResult analysisAfterMissingConfigSwitch = linkedCore.analyzeRequestJSON(emptyAnalysisRequestJSON());
   expect(
     analysisAfterMissingConfigSwitch.ok(),
-    "analysis after a missing-config engine switch returns a safe no-engine response"
+    "analysis after a missing-config engine switch keeps using the committed engine"
   );
   expect(
-    analysisAfterMissingConfigSwitch.responseJSON.find(R"("engine":"none")") != std::string::npos,
-    "missing-config engine switch clears the previous loaded engine"
+    analysisAfterMissingConfigSwitch.responseJSON.find(R"("engine":"b6")") != std::string::npos,
+    "missing-config engine switch preserves the previous loaded engine"
   );
   expect(
-    fakeEnginePtr->analyzeCalls == 1,
-    "analysis after a missing-config engine switch must not call the stale adapter model"
+    fakeEnginePtr->analyzeCalls == 2,
+    "analysis after a missing-config engine switch calls the still-committed adapter model"
   );
 
   expect(linkedCore.loadEngine("b6").ok(), "linked core can reload b6 after a failed switch");
   qixi::NativeKataGoResult fakeAnalysisAfterReload = linkedCore.analyzeRequestJSON(mixedAnalysisRequestJSON());
   expect(fakeAnalysisAfterReload.ok(), "linked core delegates analysis after reloading b6");
-  expect(fakeEnginePtr->analyzeCalls == 2, "adapter analyzeRequest is called again after reloading b6");
+  expect(fakeEnginePtr->analyzeCalls == 3, "adapter analyzeRequest is called again after reloading b6");
 
   expect(linkedCore.configureModel(b18Config()).ok(), "linked core accepts valid b18 model config");
   fakeEnginePtr->engineIDToFailOnLoad = "b18nbt";
@@ -1210,22 +1217,22 @@ int main() {
     "linked core surfaces adapter load failure while switching engines"
   );
   expect(
-    fakeEnginePtr->unloadModelCalls == unloadsBeforeFailedSwitch + 1 &&
-      fakeEnginePtr->loadModelCalls == loadsBeforeFailedSwitch + 1,
-    "adapter load failure occurs only after the old model has been unloaded"
+    fakeEnginePtr->unloadModelCalls == unloadsBeforeFailedSwitch + 2 &&
+      fakeEnginePtr->loadModelCalls == loadsBeforeFailedSwitch + 2,
+    "adapter load failure cleans up the target and restores the previous model"
   );
   qixi::NativeKataGoResult analysisAfterFailedSwitch = linkedCore.analyzeRequestJSON(emptyAnalysisRequestJSON());
   expect(
     analysisAfterFailedSwitch.ok(),
-    "analysis after a failed engine switch returns a safe no-engine response"
+    "analysis after a failed engine switch keeps the committed engine available"
   );
   expect(
-    analysisAfterFailedSwitch.responseJSON.find(R"("engine":"none")") != std::string::npos,
-    "failed engine switch clears the previous loaded engine"
+    analysisAfterFailedSwitch.responseJSON.find(R"("engine":"b6")") != std::string::npos,
+    "failed engine switch restores the previous loaded engine"
   );
   expect(
-    fakeEnginePtr->analyzeCalls == 2,
-    "analysis after a failed engine switch must not call the stale adapter model"
+    fakeEnginePtr->analyzeCalls == 4,
+    "analysis after a failed engine switch calls the restored committed model"
   );
 
   qixi::NativeKataGoResult badLinkedRequest = linkedCore.analyzeRequestJSON(
@@ -1235,7 +1242,7 @@ int main() {
     badLinkedRequest.code == qixi::NativeKataGoStatusCode::invalidRequest,
     "pass move with coordinates is rejected before reaching the adapter"
   );
-  expect(fakeEnginePtr->analyzeCalls == 2, "malformed native analysis request does not call the adapter");
+  expect(fakeEnginePtr->analyzeCalls == 4, "malformed native analysis request does not call the adapter");
 
   auto expectMalformedAdapterResponseIsRejected = [](const std::string& responseJSON, const std::string& context) {
     auto malformedEngine = std::make_unique<FakeNativeKataGoEngine>();

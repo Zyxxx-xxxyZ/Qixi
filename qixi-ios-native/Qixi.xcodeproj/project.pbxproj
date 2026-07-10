@@ -49,6 +49,10 @@
 		100000000000000000000129 /* b18nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* b18nbt.bin */; };
 		10000000000000000000012A /* b28nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000231 /* b28nbt.bin */; };
 		10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* QixiMemoryTelemetry.swift */; };
+		10000000000000000000012C /* core_types.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000233 /* core_types.cpp */; };
+		10000000000000000000012D /* board.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000234 /* board.cpp */; };
+		10000000000000000000012E /* mcts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* mcts.cpp */; };
+		10000000000000000000012F /* request_pool.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000236 /* request_pool.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -101,6 +105,10 @@
 		100000000000000000000230 /* b18nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b18nbt.bin; path = "../../b18nbt.bin"; sourceTree = "<group>"; };
 		100000000000000000000231 /* b28nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b28nbt.bin; path = "../../b28nbt.bin"; sourceTree = "<group>"; };
 		100000000000000000000232 /* QixiMemoryTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryTelemetry.swift; sourceTree = "<group>"; };
+		100000000000000000000233 /* core_types.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = core_types.cpp; path = "../../core/src/core_types.cpp"; sourceTree = "<group>"; };
+		100000000000000000000234 /* board.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = board.cpp; path = "../../core/src/board.cpp"; sourceTree = "<group>"; };
+		100000000000000000000235 /* mcts.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = mcts.cpp; path = "../../core/src/mcts.cpp"; sourceTree = "<group>"; };
+		100000000000000000000236 /* request_pool.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = request_pool.cpp; path = "../../core/src/request_pool.cpp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +156,10 @@
 				10000000000000000000021E /* QixiNativeKataGoCore.hpp */,
 				10000000000000000000021F /* QixiNativeKataGoCore.cpp */,
 				100000000000000000000227 /* QixiNativeKataGoEngine.cpp */,
+				100000000000000000000233 /* core_types.cpp */,
+				100000000000000000000234 /* board.cpp */,
+				100000000000000000000235 /* mcts.cpp */,
+				100000000000000000000236 /* request_pool.cpp */,
 				10000000000000000000021D /* Qixi-Bridging-Header.h */,
 				100000000000000000000205 /* QixiViewModel.swift */,
 				100000000000000000000206 /* RootView.swift */,
@@ -309,6 +321,10 @@
 				100000000000000000000117 /* QixiAnalysisService.swift in Sources */,
 				100000000000000000000118 /* QixiNativeKataGoBridge.mm in Sources */,
 				100000000000000000000119 /* QixiNativeKataGoCore.cpp in Sources */,
+				10000000000000000000012C /* core_types.cpp in Sources */,
+				10000000000000000000012D /* board.cpp in Sources */,
+				10000000000000000000012E /* mcts.cpp in Sources */,
+				10000000000000000000012F /* request_pool.cpp in Sources */,
 				100000000000000000000121 /* QixiNativeKataGoEngine.cpp in Sources */,
 				10000000000000000000011A /* QixiNativeModelRegistry.swift in Sources */,
 				10000000000000000000011B /* QixiPositionIdentity.swift in Sources */,
@@ -508,6 +524,10 @@
 				DEVELOPMENT_TEAM = Q795QF39Y5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../core/include",
+				);
 				INFOPLIST_FILE = Qixi/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.board-games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -545,6 +565,10 @@
 				DEVELOPMENT_TEAM = Q795QF39Y5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../core/include",
+				);
 				INFOPLIST_FILE = Qixi/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.board-games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -596,6 +620,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
+					"$(SRCROOT)/../core/include",
 					"$(SRCROOT)/../KataGo/cpp",
 					"$(KATAGO_CPP_INCLUDE_DIR)",
 				);

@@ -57,6 +57,18 @@ find_developer_tool() {
   return 1
 }
 
+resolved_built_app_bundle_id() {
+  local app_path="$1"
+  local bundle_id
+  if ! bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app_path/Info.plist" 2>/dev/null)"; then
+    fail "built app Info.plist is missing CFBundleIdentifier: $app_path/Info.plist"
+  fi
+  if [[ -z "$bundle_id" ]]; then
+    fail "built app CFBundleIdentifier must not be empty: $app_path/Info.plist"
+  fi
+  printf '%s\n' "$bundle_id"
+}
+
 reject_symlink_components() {
   local path="$1"
   local current=""
@@ -416,6 +428,8 @@ for token in (
     raise SystemExit(5)
 PY
 validate_native_release_sim_executable "$APP_EXECUTABLE"
+BUNDLE_ID="$(resolved_built_app_bundle_id "$APP_PATH")"
+echo "Using bundle id: $BUNDLE_ID"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 xcrun simctl uninstall "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true

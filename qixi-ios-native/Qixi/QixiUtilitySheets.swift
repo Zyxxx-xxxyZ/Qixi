@@ -23,9 +23,14 @@ private struct QixiPickedBoardPhoto: Transferable {
 }
 
 private struct QixiPendingBoardImage: Identifiable {
+  enum Source {
+    case data(Data)
+    case file(URL)
+  }
+
   let id = UUID()
   var image: UIImage
-  var data: Data
+  var source: Source
   var suggestedSelection: QixiBoardImageSelection
 }
 
@@ -36,7 +41,17 @@ private enum QixiPendingBoardImageFactory {
       throw QixiBoardImageRecognizer.RecognitionError.unreadableImage
     }
     let selection = (try? QixiBoardImageRecognizer.suggestedSelection(from: data)) ?? .defaultGrid
-    return QixiPendingBoardImage(image: image, data: data, suggestedSelection: selection)
+    return QixiPendingBoardImage(image: image, source: .data(data), suggestedSelection: selection)
+  }
+
+  static func make(from url: URL) throws -> QixiPendingBoardImage {
+    let preview = try QixiBoardImageRecognizer.selectionPreviewImage(from: url)
+    let selection = (try? QixiBoardImageRecognizer.suggestedSelection(from: url)) ?? .defaultGrid
+    return QixiPendingBoardImage(
+      image: UIImage(cgImage: preview),
+      source: .file(url),
+      suggestedSelection: selection
+    )
   }
 }
 
@@ -127,6 +142,8 @@ struct QixiUtilitySheetView: View {
       .presentationDragIndicator(.visible)
       .background(QixiColor.background)
     }
+    .disabled(model.isBackendInteractionBlocked)
+    .interactiveDismissDisabled(model.isBackendInteractionBlocked)
     .accessibilityIdentifier("qixi-utility-sheet-\(sheet.rawValue)")
   }
 
@@ -146,6 +163,8 @@ private struct CameraRecognitionSheet: View {
   @State private var isCameraPresented = false
   @State private var isRecognizing = false
   @State private var pendingBoardImage: QixiPendingBoardImage?
+  @State private var pendingTemporaryPhotoURL: URL?
+  @State private var isConsumingPendingPhoto = false
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
@@ -192,18 +211,24 @@ private struct CameraRecognitionSheet: View {
           prepareCapturedImageForSelection(image)
         }
       }
-      .fullScreenCover(item: $pendingBoardImage) { pending in
+      .fullScreenCover(item: $pendingBoardImage, onDismiss: {
+        if !isConsumingPendingPhoto {
+          cleanupPendingPhotoFile()
+        }
+      }) { pending in
         QixiBoardCropSelectionView(
           image: pending.image,
           initialSelection: pending.suggestedSelection,
           onCancel: {
             pendingBoardImage = nil
+            cleanupPendingPhotoFile()
             status = L10n.text(.cameraSheetIdle)
           },
           onAutoLocate: {
-            try? QixiBoardImageRecognizer.suggestedSelection(from: pending.data)
+            pending.suggestedSelection
           },
           onRecognize: { selection in
+            isConsumingPendingPhoto = true
             pendingBoardImage = nil
             recognizePendingImage(pending, selection: selection)
           }
@@ -212,56 +237,71 @@ private struct CameraRecognitionSheet: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(24)
+    .onDisappear(perform: cleanupPendingPhotoFile)
   }
 
   private func preparePickedPhotoForSelection(_ item: PhotosPickerItem) {
     Task {
-      await setRecognizing(true)
-      defer { Task { await setRecognizing(false) } }
+      setRecognizing(true)
+      defer { setRecognizing(false) }
       do {
         guard let photo = try await item.loadTransferable(type: QixiPickedBoardPhoto.self) else { return }
-        defer { photo.removeTemporaryFile() }
-        let pending = try await Task.detached(priority: .userInitiated) {
-          try QixiPendingBoardImageFactory.make(from: Data(contentsOf: photo.url))
-        }.value
-        await presentPendingImage(pending)
+        let pending: QixiPendingBoardImage
+        do {
+          pending = try await Task.detached(priority: .userInitiated) {
+            try QixiPendingBoardImageFactory.make(from: photo.url)
+          }.value
+        } catch {
+          photo.removeTemporaryFile()
+          throw error
+        }
+        pendingTemporaryPhotoURL = photo.url
+        presentPendingImage(pending)
       } catch {
-        await failRecognition(error)
+        failRecognition(error)
       }
     }
   }
 
   private func prepareCapturedImageForSelection(_ image: UIImage) {
     Task {
-      await setRecognizing(true)
-      defer { Task { await setRecognizing(false) } }
+      setRecognizing(true)
+      defer { setRecognizing(false) }
       do {
         guard let data = image.jpegData(compressionQuality: 0.92) else {
-          await failRecognition()
+          failRecognition()
           return
         }
         let pending = try await Task.detached(priority: .userInitiated) {
           try QixiPendingBoardImageFactory.make(from: data)
         }.value
-        await presentPendingImage(pending)
+        presentPendingImage(pending)
       } catch {
-        await failRecognition(error)
+        failRecognition(error)
       }
     }
   }
 
   private func recognizePendingImage(_ pending: QixiPendingBoardImage, selection: QixiBoardImageSelection) {
     Task {
-      await setRecognizing(true)
-      defer { Task { await setRecognizing(false) } }
+      setRecognizing(true)
+      defer {
+        setRecognizing(false)
+        isConsumingPendingPhoto = false
+        cleanupPendingPhotoFile()
+      }
       do {
-        let data = pending.data
         let result = try await Task.detached(priority: .userInitiated) {
-          try QixiBoardImageRecognizer.recognizeBoard(from: data, selection: selection)
+          switch pending.source {
+          case .data(let data):
+            return try QixiBoardImageRecognizer.recognizeBoard(from: data, selection: selection)
+          case .file(let url):
+            return try QixiBoardImageRecognizer.recognizeBoard(from: url, selection: selection)
+          }
         }.value
         await finishRecognition(result)
       } catch {
-        await failRecognition(error)
+        failRecognition(error)
       }
     }
   }
@@ -302,6 +342,13 @@ private struct CameraRecognitionSheet: View {
     } else {
       status = L10n.text(.cameraRecognitionFailed)
     }
+  }
+
+  @MainActor
+  private func cleanupPendingPhotoFile() {
+    guard let url = pendingTemporaryPhotoURL else { return }
+    pendingTemporaryPhotoURL = nil
+    try? FileManager.default.removeItem(at: url)
   }
 }
 

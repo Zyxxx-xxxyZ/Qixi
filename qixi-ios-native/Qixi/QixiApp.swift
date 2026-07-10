@@ -27,7 +27,7 @@ struct QixiApp: App {
       case .inactive:
         model.handleLifecycleTombstone(reason: "scenePhase.inactive")
       case .active:
-        break
+        model.handleLifecycleForeground()
       @unknown default:
         model.handleLifecycleTombstone(reason: "scenePhase.unknown")
       }

@@ -42,6 +42,11 @@ protocol NativeKataGoBridgeProtocol: AnyObject {
   func analyzeRequestJSON(_ requestJSON: String) throws -> String
   func exportTombstone(to url: URL) throws
   func restoreTombstone(from url: URL) throws
+  func submitCoreRequestJSON(_ requestJSON: String) throws -> String
+  func latestCoreSnapshotJSON() throws -> String
+  func legalMoveMaskJSON() throws -> String
+  func exportCoreState(to url: URL) throws
+  func importCoreState(from url: URL) throws
 }
 
 extension QixiNativeKataGoBridge: NativeKataGoBridgeProtocol {
@@ -52,9 +57,17 @@ extension QixiNativeKataGoBridge: NativeKataGoBridgeProtocol {
   func restoreTombstone(from url: URL) throws {
     try restoreTombstone(fromFile: url.path)
   }
+
+  func exportCoreState(to url: URL) throws {
+    try exportCoreState(toFile: url.path)
+  }
+
+  func importCoreState(from url: URL) throws {
+    try importCoreState(fromFile: url.path)
+  }
 }
 
-actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneService {
+actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneService, QixiCoreBackendService {
   nonisolated var runtime: QixiAnalysisRuntime { .nativeInProcess }
   private static let nativeErrorDomain = "QixiNativeKataGo"
   private static let libraryNotLinkedErrorCode = 1
@@ -64,6 +77,8 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
   private let modelStore: QixiNativeModelStore
   private let memoryPolicy: QixiNativeDeviceMemoryPolicy
   private var currentEngine: AnalysisEngine = .none
+  private let coreJSONEncoder = JSONEncoder()
+  private let coreJSONDecoder = JSONDecoder()
 
   init(
     bridge: NativeKataGoBridgeProtocol = QixiNativeKataGoBridge(),
@@ -86,10 +101,7 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
           paused: false
         )
       }
-      if engine == .none {
-        currentEngine = .none
-      } else if let spec = QixiNativeModelRegistry.spec(for: engine) {
-        try clearLoadedEngineBeforeRealEngineSwitch()
+      if engine != .none, let spec = QixiNativeModelRegistry.spec(for: engine) {
         guard bridge.isLinked else {
           throw QixiNativeKataGoServiceError.libraryNotLinked
         }
@@ -120,6 +132,73 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
       )
     } catch {
       throw mapNativeBridgeError(error)
+    }
+  }
+
+  func submitCoreRequest(_ request: QixiCoreRequest) async throws -> QixiCoreBackendResult {
+    do {
+      return try submitCoreRequestSync(request)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  func latestCoreSnapshot() async throws -> QixiCoreBackendResult {
+    do {
+      let responseJSON = try bridge.latestCoreSnapshotJSON()
+      return try decodeCoreBackendResult(from: responseJSON)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  func legalMoveMask() async throws -> QixiCoreLegalMoveMask {
+    do {
+      let responseJSON = try bridge.legalMoveMaskJSON()
+      let data = try NativeKataGoBridgeResponseValidator.validatedData(
+        from: responseJSON,
+        maxResponseBytes: NativeKataGoBridgeResponseValidator.maxCoreResponseBytes
+      )
+      return try coreJSONDecoder.decode(QixiCoreLegalMoveMask.self, from: data)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  func exportCoreState(to url: URL) async throws {
+    do {
+      try bridge.exportCoreState(to: url)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  func importCoreState(from url: URL) async throws {
+    do {
+      try bridge.importCoreState(from: url)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  private func submitCoreRequestSync(_ request: QixiCoreRequest) throws -> QixiCoreBackendResult {
+    let data = try coreJSONEncoder.encode(request)
+    let requestJSON = String(decoding: data, as: UTF8.self)
+    let responseJSON = try bridge.submitCoreRequestJSON(requestJSON)
+    return try decodeCoreBackendResult(from: responseJSON)
+  }
+
+  private func decodeCoreBackendResult(from responseJSON: String) throws -> QixiCoreBackendResult {
+    let data = try NativeKataGoBridgeResponseValidator.validatedData(
+      from: responseJSON,
+      maxResponseBytes: NativeKataGoBridgeResponseValidator.maxCoreResponseBytes
+    )
+    do {
+      return try coreJSONDecoder.decode(QixiCoreBackendResult.self, from: data)
+    } catch {
+      throw QixiNativeKataGoServiceError.invalidBridgeResponse(
+        "Native Qixi core response could not be decoded: \(error)"
+      )
     }
   }
 
@@ -224,8 +303,12 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
 
 enum NativeKataGoBridgeResponseValidator {
   static let maxResponseBytes = 1024 * 1024
+  static let maxCoreResponseBytes = 8 * 1024 * 1024
 
-  static func validatedData(from responseJSON: String) throws -> Data {
+  static func validatedData(
+    from responseJSON: String,
+    maxResponseBytes: Int = NativeKataGoBridgeResponseValidator.maxResponseBytes
+  ) throws -> Data {
     let byteCount = responseJSON.utf8.count
     guard byteCount <= maxResponseBytes else {
       throw QixiNativeKataGoServiceError.invalidBridgeResponse(

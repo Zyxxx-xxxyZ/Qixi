@@ -11,6 +11,7 @@ CXX_BIN="${CXX:-clang++}"
   -Wno-deprecated-literal-operator \
   -DCOMPILE_MAX_BOARD_LEN=19 \
   -I"$ROOT_DIR/KataGo/cpp" \
+  -I"$ROOT_DIR/core/include" \
   -I"$ROOT_DIR/qixi-ios-native/Qixi" \
   "$ROOT_DIR/qixi-ios-native/tests/native_katago_adapter_compile_probe.cpp"
 

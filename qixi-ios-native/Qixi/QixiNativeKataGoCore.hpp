@@ -1,5 +1,7 @@
 #pragma once
 
+#include "qixi/request_pool.hpp"
+
 #include <array>
 #include <memory>
 #include <string>
@@ -106,6 +108,7 @@ public:
   virtual NativeKataGoResult analyzeRequest(const NativeKataGoAnalysisRequest& request) = 0;
   virtual NativeKataGoResult exportTombstoneToFile(const std::string& filePath) = 0;
   virtual NativeKataGoResult restoreTombstoneFromFile(const std::string& filePath) = 0;
+  virtual core::Evaluator* coreEvaluator() = 0;
 };
 
 std::unique_ptr<NativeKataGoEngine> makeNativeKataGoEngine();
@@ -126,18 +129,33 @@ class NativeKataGoCore final {
 public:
   NativeKataGoCore();
   explicit NativeKataGoCore(std::unique_ptr<NativeKataGoEngine> engine);
+  ~NativeKataGoCore();
 
   bool isLinked() const;
+  NativeKataGoResult configureCoreStoreDirectory(const std::string& path);
   NativeKataGoResult configureModel(const NativeKataGoModelConfig& config);
   NativeKataGoResult loadEngine(const std::string& engineID);
   NativeKataGoResult analyzeRequestJSON(const std::string& requestJSON);
   NativeKataGoResult exportTombstoneToFile(const std::string& filePath);
   NativeKataGoResult restoreTombstoneFromFile(const std::string& filePath);
+  NativeKataGoResult submitCoreRequestJSON(const std::string& requestJSON);
+  NativeKataGoResult latestCoreSnapshotJSON();
+  NativeKataGoResult legalMoveMaskJSON();
+  NativeKataGoResult exportCoreStateToFile(const std::string& filePath);
+  NativeKataGoResult importCoreStateFromFile(const std::string& filePath);
 
 private:
+  bool selectCoreEngine(core::ModelId modelId, core::Evaluator*& evaluator, std::string& error);
+  NativeKataGoResult submitCoreRequestLocked(
+    core::RequestKind kind,
+    core::RequestPayload payload,
+    core::BackendEpoch expectedEpoch
+  );
+
   std::string loadedEngineID = "none";
   std::unique_ptr<NativeKataGoEngine> engine;
   std::unordered_map<std::string, NativeKataGoModelConfig> modelConfigs;
+  core::BackendWorker coreBackend;
 };
 
 }  // namespace qixi

@@ -44,9 +44,8 @@ normal pull request:
   clear candidates and territory before the debounced engine refresh, so the
   same root under different komi or root-noise settings cannot display stale
   candidate or ownership data.
-  Disabled-analysis paths also refresh the local chart anchor, so no-engine
-  play or pass cannot leave stale winrate or score anchors after the current
-  ply changes.
+  Disabled-analysis paths preserve the visible analysis, so switching to no
+  engine does not erase the current analysis while the model is unloaded.
   Non-none engine selection is saved immediately after `selectedEngine` changes
   and before engine loading or analysis starts, so launch restore preserves the
   user's selected model even when model loading or analysis later fails.

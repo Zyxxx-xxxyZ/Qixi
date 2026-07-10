@@ -25,6 +25,11 @@ typedef NS_ERROR_ENUM(QixiNativeKataGoErrorDomain, QixiNativeKataGoError) {
 - (nullable NSString *)analyzeRequestJSON:(NSString *)requestJSON error:(NSError **)error;
 - (BOOL)exportTombstoneToFile:(NSString *)filePath error:(NSError **)error;
 - (BOOL)restoreTombstoneFromFile:(NSString *)filePath error:(NSError **)error;
+- (nullable NSString *)submitCoreRequestJSON:(NSString *)requestJSON error:(NSError **)error;
+- (nullable NSString *)latestCoreSnapshotJSONWithError:(NSError **)error;
+- (nullable NSString *)legalMoveMaskJSONWithError:(NSError **)error;
+- (BOOL)exportCoreStateToFile:(NSString *)filePath error:(NSError **)error;
+- (BOOL)importCoreStateFromFile:(NSString *)filePath error:(NSError **)error;
 
 @end
 

@@ -11,6 +11,10 @@ CORE_SMOKE_OUT="${TMPDIR:-/tmp}/qixi-native-katago-core-smoke"
 BRIDGE_OBJ="${TMPDIR:-/tmp}/qixi-native-katago-bridge-smoke.o"
 CORE_OBJ="${TMPDIR:-/tmp}/qixi-native-katago-core-smoke.o"
 ENGINE_OBJ="${TMPDIR:-/tmp}/qixi-native-katago-engine-smoke.o"
+CORE_TYPES_OBJ="${TMPDIR:-/tmp}/qixi-core-types-smoke.o"
+BOARD_OBJ="${TMPDIR:-/tmp}/qixi-board-smoke.o"
+MCTS_OBJ="${TMPDIR:-/tmp}/qixi-mcts-smoke.o"
+REQUEST_POOL_OBJ="${TMPDIR:-/tmp}/qixi-request-pool-smoke.o"
 POSITION_IDENTITY_FIXTURE="$ROOT_DIR/tests/fixtures/position_identity_cases.json"
 SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 CLANGXX="$(xcrun --find clang++)"
@@ -22,6 +26,7 @@ CLANGXX="$(xcrun --find clang++)"
   -isysroot "$SDKROOT" \
   -mmacosx-version-min=13.0 \
   -I "$NATIVE_DIR/Qixi" \
+  -I "$ROOT_DIR/core/include" \
   -c "$NATIVE_DIR/Qixi/QixiNativeKataGoCore.cpp" \
   -o "$CORE_OBJ"
 
@@ -30,17 +35,32 @@ CLANGXX="$(xcrun --find clang++)"
   -isysroot "$SDKROOT" \
   -mmacosx-version-min=13.0 \
   -I "$NATIVE_DIR/Qixi" \
+  -I "$ROOT_DIR/core/include" \
   -c "$NATIVE_DIR/Qixi/QixiNativeKataGoEngine.cpp" \
   -o "$ENGINE_OBJ"
+
+"$CLANGXX" -std=c++17 -isysroot "$SDKROOT" -mmacosx-version-min=13.0 \
+  -I "$ROOT_DIR/core/include" -c "$ROOT_DIR/core/src/core_types.cpp" -o "$CORE_TYPES_OBJ"
+"$CLANGXX" -std=c++17 -isysroot "$SDKROOT" -mmacosx-version-min=13.0 \
+  -I "$ROOT_DIR/core/include" -c "$ROOT_DIR/core/src/board.cpp" -o "$BOARD_OBJ"
+"$CLANGXX" -std=c++17 -isysroot "$SDKROOT" -mmacosx-version-min=13.0 \
+  -I "$ROOT_DIR/core/include" -c "$ROOT_DIR/core/src/mcts.cpp" -o "$MCTS_OBJ"
+"$CLANGXX" -std=c++17 -isysroot "$SDKROOT" -mmacosx-version-min=13.0 \
+  -I "$ROOT_DIR/core/include" -c "$ROOT_DIR/core/src/request_pool.cpp" -o "$REQUEST_POOL_OBJ"
 
 "$CLANGXX" \
   -std=c++17 \
   -isysroot "$SDKROOT" \
   -mmacosx-version-min=13.0 \
   -I "$NATIVE_DIR/Qixi" \
+  -I "$ROOT_DIR/core/include" \
   "$SCRIPT_DIR/native_katago_core_smoke.cpp" \
   "$CORE_OBJ" \
   "$ENGINE_OBJ" \
+  "$CORE_TYPES_OBJ" \
+  "$BOARD_OBJ" \
+  "$MCTS_OBJ" \
+  "$REQUEST_POOL_OBJ" \
   -o "$CORE_SMOKE_OUT"
 
 "$CORE_SMOKE_OUT"
@@ -51,6 +71,7 @@ CLANGXX="$(xcrun --find clang++)"
   -isysroot "$SDKROOT" \
   -mmacosx-version-min=13.0 \
   -I "$NATIVE_DIR/Qixi" \
+  -I "$ROOT_DIR/core/include" \
   -c "$NATIVE_DIR/Qixi/QixiNativeKataGoBridge.mm" \
   -o "$BRIDGE_OBJ"
 
@@ -73,6 +94,10 @@ swiftc \
   "$BRIDGE_OBJ" \
   "$CORE_OBJ" \
   "$ENGINE_OBJ" \
+  "$CORE_TYPES_OBJ" \
+  "$BOARD_OBJ" \
+  "$MCTS_OBJ" \
+  "$REQUEST_POOL_OBJ" \
   -lc++ \
   -o "$OUT"
 

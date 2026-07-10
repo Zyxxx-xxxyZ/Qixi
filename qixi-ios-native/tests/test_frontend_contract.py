@@ -1027,8 +1027,12 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("if currentEngine == engine", native_service)
     self.assertIn('state: engine == .none ? "no engine loaded" : "native engine already loaded"', native_service)
     self.assertLess(
-      native_service.index("if currentEngine == engine"),
-      native_service.index("try clearLoadedEngineBeforeRealEngineSwitch()"),
+      native_service.index("guard memoryPolicy.canLoad(spec)"),
+      native_service.index("try bridge.loadEngine(engine.rawValue)"),
+    )
+    self.assertLess(
+      native_service.index("try bridge.loadEngine(engine.rawValue)"),
+      native_service.index("currentEngine = engine"),
     )
     self.assertLess(
       native_service.index("guard let resolved = modelStore.resolvedModel(for: spec)"),
@@ -1038,7 +1042,7 @@ class NativeFrontendContractTests(unittest.TestCase):
       native_service.index("guard memoryPolicy.canLoad(spec)"),
       native_service.index("try bridge.configureModel"),
     )
-    self.assertIn("if engine == .none {\n        currentEngine = .none", native_service)
+    self.assertIn("if engine != .none, let spec = QixiNativeModelRegistry.spec(for: engine)", native_service)
     self.assertIn("QixiPositionIdentity.cacheKey", native_service)
     self.assertIn("try QixiAnalysisInputValidator.validate(", native_service)
     self.assertIn("maxVisits: maxVisits", native_service)
@@ -1425,15 +1429,17 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("Native KataGo CoreML package path must not be empty", core_impl)
     self.assertIn("Native KataGo CoreML package path must point to a readable non-empty directory", core_impl)
     self.assertIn("config.minimumMemoryMB > config.recommendedMemoryMB", core_impl)
-    self.assertIn("auto config = modelConfigs.find(engineID)", core_impl)
-    self.assertIn("config == modelConfigs.end()", core_impl)
+    self.assertIn("const auto targetConfig = modelConfigs.find(engineID)", core_impl)
+    self.assertIn("targetConfig == modelConfigs.end()", core_impl)
     self.assertIn("NativeKataGoResult unloadResult = engine->unloadModel()", core_impl)
     self.assertLess(
       core_impl.index("NativeKataGoResult unloadResult = engine->unloadModel()"),
-      core_impl.index("engine->loadModel(config->second)"),
+      core_impl.index("engine->loadModel(targetConfig->second)"),
     )
-    self.assertIn("if(!unloadResult.ok())\n    return unloadResult;", core_impl)
-    self.assertIn("engine->loadModel(config->second)", core_impl)
+    self.assertIn("if(!unloadResult.ok()) {\n    error = unloadResult.message;", core_impl)
+    self.assertIn("engine->loadModel(targetConfig->second)", core_impl)
+    self.assertIn("restorePreviousModel", core_impl)
+    self.assertIn('error += "; previous model restored"', core_impl)
     self.assertIn("engine->analyzeRequest(request)", core_impl)
     self.assertIn("engine->exportTombstoneToFile(filePath)", core_impl)
     self.assertIn("engine->restoreTombstoneFromFile(filePath)", core_impl)
@@ -1632,6 +1638,9 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("public NativeKataGoEngine", engine_impl)
     self.assertIn("NativeKataGoStatusCode::libraryNotLinked", engine_impl)
     self.assertIn("Native KataGo is not linked into this build.", engine_impl)
+    self.assertIn("#include <TargetConditionals.h>", engine_impl)
+    self.assertIn("#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR", engine_impl)
+    self.assertIn("Metal mux model inference is unavailable in iOS Simulator", engine_impl)
     self.assertIn("unloadModel()", engine_impl)
     self.assertIn("No native KataGo model is loaded.", engine_impl)
     self.assertIn("exportTombstoneToFile", engine_impl)
@@ -1748,7 +1757,7 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("loading none delegates adapter unload exactly once after a real model was loaded", core_smoke)
     self.assertIn("linked core surfaces adapter unload failure before switching engines", core_smoke)
     self.assertIn("adapter loadModel for the next engine is not called after unload failure", core_smoke)
-    self.assertIn("analysis after adapter unload failure must not call the stale adapter model", core_smoke)
+    self.assertIn("analysis after adapter unload failure calls the still-loaded committed model", core_smoke)
     self.assertIn("linked core delegates real engine load to adapter", core_smoke)
     self.assertIn("adapter receives verified CoreML package paths from the configured model", core_smoke)
     self.assertIn("linked core delegates analysis to adapter after loading", core_smoke)
@@ -1791,14 +1800,14 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("linked core unloads the adapter model after native tombstone restore failure", core_smoke)
     self.assertIn("analysis after native tombstone restore failure must not call the stale adapter model", core_smoke)
     self.assertIn("linked core can reload b6 after a failed tombstone restore", core_smoke)
-    self.assertIn("missing-config engine switch clears the previous loaded engine", core_smoke)
-    self.assertIn("missing-config engine switch unloads the previously loaded adapter model", core_smoke)
-    self.assertIn("analysis after a missing-config engine switch must not call the stale adapter model", core_smoke)
+    self.assertIn("missing-config engine switch preserves the previous loaded engine", core_smoke)
+    self.assertIn("missing-config engine switch is rejected before touching the loaded adapter model", core_smoke)
+    self.assertIn("analysis after a missing-config engine switch calls the still-committed adapter model", core_smoke)
     self.assertIn("linked core can reload b6 after a failed switch", core_smoke)
     self.assertIn("fakeEnginePtr->engineIDToFailOnLoad = \"b18nbt\"", core_smoke)
-    self.assertIn("adapter load failure occurs only after the old model has been unloaded", core_smoke)
-    self.assertIn("failed engine switch clears the previous loaded engine", core_smoke)
-    self.assertIn("analysis after a failed engine switch must not call the stale adapter model", core_smoke)
+    self.assertIn("adapter load failure cleans up the target and restores the previous model", core_smoke)
+    self.assertIn("failed engine switch restores the previous loaded engine", core_smoke)
+    self.assertIn("analysis after a failed engine switch calls the restored committed model", core_smoke)
     self.assertIn("malformed adapter analysis response is rejected", core_smoke)
     self.assertIn("malformed analysis response", core_smoke)
     self.assertIn("root winrate outside [0,1]", core_smoke)
@@ -1941,7 +1950,7 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("native model installer excludes model install receipts from iCloud backup", smoke_driver)
     self.assertIn("native service must reject a present model when the device memory budget is too low", smoke_driver)
     self.assertIn("native service low-memory error reports the selected model and available budget", smoke_driver)
-    self.assertIn("native service clears stale native state before refusing a low-memory model load", smoke_driver)
+    self.assertIn("native service rejects a low-memory model before touching native engine state", smoke_driver)
     self.assertIn("native service must not configure a real model below its minimum memory budget", smoke_driver)
     self.assertIn("native service analyzes as none after refusing a low-memory real-engine load", smoke_driver)
     self.assertIn("isExcludedFromBackupKey", smoke_driver)
@@ -2007,18 +2016,17 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("loaded native service must reject a no-engine adapter response", smoke_driver)
     self.assertIn("native service rejects adapter engine mismatch before caching analysis", smoke_driver)
     self.assertIn("fake native switch to b18 must fail because the b18 model is missing", smoke_driver)
-    self.assertIn("native service clears currentEngine when a real-engine switch fails before bridge loading", smoke_driver)
-    self.assertIn("native service asks the bridge to clear stale native state before each real-engine switch", smoke_driver)
-    self.assertIn('fakeSwitchBridge.loadedEngineIDs == ["none", "b6", "none"]', smoke_driver)
+    self.assertIn("native service preserves currentEngine when a switch fails before bridge loading", smoke_driver)
+    self.assertIn("native service leaves the committed bridge engine untouched when target validation fails", smoke_driver)
+    self.assertIn('fakeSwitchBridge.loadedEngineIDs == ["b6"]', smoke_driver)
     self.assertIn("native service must surface a failed no-engine unload", smoke_driver)
-    self.assertIn("native service must reject stale b6 analysis after a failed no-engine unload", smoke_driver)
-    self.assertIn("native service clears currentEngine before a no-engine unload can fail", smoke_driver)
+    self.assertIn("native service preserves the committed engine after a failed no-engine unload", smoke_driver)
     self.assertIn("raw native bridge exports no-engine tombstone JSON", smoke_driver)
     self.assertIn("native service exports engine tombstones through the bridge", smoke_driver)
     self.assertIn("native service restores no-engine tombstones through the bridge", smoke_driver)
     self.assertIn("native service pins the bridge to none before restoring a no-engine tombstone", smoke_driver)
     self.assertIn("native service loads the requested real engine before restoring its tombstone", smoke_driver)
-    self.assertIn('fakeRealRestoreBridge.loadedEngineIDs == ["none", "b6"]', smoke_driver)
+    self.assertIn('fakeRealRestoreBridge.loadedEngineIDs == ["b6"]', smoke_driver)
     self.assertIn("native service clears the loaded real engine after tombstone restore failure", smoke_driver)
     self.assertIn("native service analyzes as none after a real-engine tombstone restore failure", smoke_driver)
     self.assertIn("QixiNativeKataGoServiceError.insufficientDeviceMemory", smoke_driver)
@@ -2595,7 +2603,7 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("trigger: .analysis", view_model)
     self.assertIn("trigger: .launch", view_model)
     self.assertLess(
-      view_model.index("let restoredEngineTombstone = await restoreEngineTombstoneIfAvailable()"),
+      view_model.index("let restoredEngineTombstone = coreBackendService == nil"),
       view_model.index("exportAutomationRealDeviceEvidenceIfRequested(\n      environment: ProcessInfo.processInfo.environment,\n      trigger: .launch")
     )
     self.assertIn("hasExportedAutomationRealDeviceEvidence", view_model)
@@ -2684,7 +2692,8 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("saveSoon(reason: \"launchReady\")", view_model)
     self.assertIn("let wroteAutomationLifecycleTombstone = handleAutomationLifecycleTombstoneIfNeeded", view_model)
     self.assertIn("if !wroteAutomationLifecycleTombstone", view_model)
-    self.assertIn("await resumeAnalysisAfterLaunch()", view_model)
+    self.assertIn("await resumeAnalysisAfterLaunch(transitionToken: launchTransitionToken)", view_model)
+    self.assertIn("model.handleLifecycleForeground()", app)
     self.assertIn("saveNow(reason: \"beforeEngineSwitch\")", view_model)
     self.assertIn("@Published private(set) var lastEngineError: String?", view_model)
     self.assertIn('saveNow(reason: "engineSelected")', view_model)
@@ -2705,7 +2714,7 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("private func restoreEngineTombstoneIfAvailable() async -> Bool", view_model)
     self.assertIn("try await engineTombstoneService.restoreEngineTombstone(from: tombstoneURL, for: engine)", view_model)
     self.assertIn("try QixiEngineTombstoneStore.markRestored(engine: engine)", view_model)
-    self.assertIn("let restoredEngineTombstone = await restoreEngineTombstoneIfAvailable()", view_model)
+    self.assertIn("let restoredEngineTombstone = coreBackendService == nil", view_model)
     self.assertIn("if !assumesEngineAlreadyLoaded", view_model)
     self.assertIn("private func currentSnapshot(reason: String) -> QixiAppSnapshot", view_model)
     self.assertIn("private func persist(_ snapshot: QixiAppSnapshot) throws", view_model)
@@ -2743,7 +2752,8 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("hermesStatus = .loading", none_switch_body)
     self.assertIn("_ = try await analysisService.setEngine(.none)", none_switch_body)
     self.assertIn("try Task.checkCancellation()", none_switch_body)
-    self.assertIn("guard let self, self.selectedEngine == .none else { return }", none_switch_body)
+    self.assertIn("guard let self else { return }", none_switch_body)
+    self.assertIn("guard self.selectedEngine == .none else { return }", none_switch_body)
     self.assertIn("lastEngineError = nil", none_switch_body)
     self.assertIn("localizedEngineError(error, fallbackKey: .engineErrorUnloadFailed)", none_switch_body)
     self.assertIn("hermesStatus = .offline", none_switch_body)
@@ -2762,7 +2772,7 @@ class NativeFrontendContractTests(unittest.TestCase):
     )
     self.assertLess(
       select_engine_body.index('recordRuntimeDiagnostic(event: "engineSelected", success: true'),
-      select_engine_body.index("startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)"),
+      select_engine_body.index("startAnalysis(\n      engine: engine,\n      assumesEngineAlreadyLoaded: false,"),
     )
     self.assertIn("QixiRuntimeDiagnosticStore.record(diagnostic)", view_model)
     self.assertIn("private func applyAutomationEngineErrorIfNeeded(environment:", view_model)
@@ -3319,10 +3329,11 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("reloadInstalledModelIfNeeded(engine: installed.modelSpec.engine", view_model)
     self.assertIn("private func unloadSelectedEngineForModelInstall(_ engine: AnalysisEngine) async throws", view_model)
     self.assertIn('saveNow(reason: "beforeModelInstall")', view_model)
+    self.assertIn("try await submitCoreEngineSelectionAndWait(.none, reason: \"coreModelInstallUnload\")", view_model)
     self.assertIn("_ = try await analysisService.setEngine(.none)", view_model)
     self.assertIn("private func recoverAfterModelInstallFailure(", view_model)
     self.assertIn('saveNow(reason: "modelInstallFailed")', view_model)
-    self.assertIn("startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)", view_model)
+    self.assertIn("transitionToken: transitionToken", view_model)
     self.assertIn("hermesStatus = .offline", view_model)
     self.assertIn("private func reloadInstalledModelIfNeeded(engine: AnalysisEngine, wasReplacingSelectedEngine: Bool)", view_model)
     self.assertIn("NSCameraUsageDescription", plist)
@@ -3393,10 +3404,14 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("FileManager.default.copyItem(at: sourceURL, to: destinationURL)", utility)
     self.assertIn("removeTemporaryFile()", utility)
     self.assertIn("item.loadTransferable(type: QixiPickedBoardPhoto.self)", utility)
-    self.assertIn("defer { photo.removeTemporaryFile() }", utility)
-    self.assertIn("QixiPendingBoardImageFactory.make(from: Data(contentsOf: photo.url))", utility)
+    self.assertIn("QixiPendingBoardImageFactory.make(from: photo.url)", utility)
+    self.assertIn("pendingTemporaryPhotoURL = photo.url", utility)
+    self.assertIn("QixiBoardImageRecognizer.selectionPreviewImage(from: url)", utility)
     self.assertIn("QixiBoardCropSelectionView(", utility)
     self.assertIn("QixiBoardImageRecognizer.recognizeBoard(from: data, selection: selection)", utility)
+    self.assertIn("QixiBoardImageRecognizer.recognizeBoard(from: url, selection: selection)", utility)
+    self.assertIn("cleanupPendingPhotoFile()", utility)
+    self.assertNotIn("Data(contentsOf: photo.url)", utility)
     self.assertNotIn("item.loadTransferable(type: Data.self)", utility)
     self.assertNotIn("model.recognizeBoardImage(data: data)", utility)
     self.assertIn("L10n.text(.cameraHistoryWarning)", utility)
@@ -3665,7 +3680,7 @@ class NativeFrontendContractTests(unittest.TestCase):
       self.assertIn(transition, view_model)
     self.assertGreaterEqual(view_model.count("invalidateActiveAnalysisForPositionChange()"), 8)
     start_body_match = re.search(
-      r"private func startAnalysis\(\n    engine: AnalysisEngine,\n    assumesEngineAlreadyLoaded: Bool\n  \) \{(?P<body>.*?)\n  \}\n\n  func step",
+      r"private func startAnalysis\(\n    engine: AnalysisEngine,\n    assumesEngineAlreadyLoaded: Bool,\n    transitionToken: UInt64\? = nil,\n    rollbackEngine: AnalysisEngine\? = nil,\n    preservedEngineError: String\? = nil\n  \) \{(?P<body>.*?)\n  \}\n\n  private func startCoreSnapshotPolling",
       view_model,
       re.S,
     )
@@ -4099,6 +4114,8 @@ class NativeFrontendContractTests(unittest.TestCase):
   def test_tree_nodes_share_candidate_color_mechanism(self) -> None:
     left = read(SRC / "LeftAnalysisPane.swift")
     view_model = read(SRC / "QixiViewModel.swift")
+    analysis_service = read(SRC / "QixiAnalysisService.swift")
+    native_core = read(SRC / "QixiNativeKataGoCore.cpp")
     models = read(SRC / "QixiModels.swift")
     palette = read(SRC / "CandidatePalette.swift")
     layout = read(SRC / "VariationTreeLayout.swift")
@@ -4107,6 +4124,10 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("var qualityDeltaPercent: Double?", models)
     self.assertIn("var qualityDeltaPercent: Double?", layout)
     self.assertIn("private func variationQualityDelta(for record: QixiVariationNodeRecord) -> Double?", view_model)
+    self.assertIn("coreQualityDeltaByVariationNodeID", view_model)
+    self.assertIn("return coreQualityDeltaByVariationNodeID[record.id]", view_model)
+    self.assertIn("var qualityDeltaPercent: Double?", analysis_service)
+    self.assertIn('\\"qualityDeltaPercent\\":', native_core)
     self.assertIn("private func cachedVariationAnalysis(for nodeID: String) -> QixiCachedAnalysis?", view_model)
     self.assertIn("private func variationMoveWinrateFromAnalyzedChild(", view_model)
     self.assertIn("let parentCache = cachedVariationAnalysis(for: parentID)", view_model)
@@ -4134,6 +4155,36 @@ class NativeFrontendContractTests(unittest.TestCase):
     self.assertIn("edge.points.count >= 2 && edge.points.count <= 4", smoke)
     self.assertIn("nodes are separated by at least one hit target", smoke)
     self.assertIn("edge segment uses only allowed directions", smoke)
+
+  def test_backend_transitions_block_ui_and_use_fifo_core_barriers(self) -> None:
+    view_model = read(SRC / "QixiViewModel.swift")
+    root = read(SRC / "RootView.swift")
+    utility = read(SRC / "QixiUtilitySheets.swift")
+    app = read(SRC / "QixiApp.swift")
+
+    self.assertIn("enum QixiBackendTransition: Equatable", view_model)
+    self.assertIn("@Published private(set) var backendTransition", view_model)
+    self.assertIn("private func beginBackendTransition", view_model)
+    self.assertIn("private func finishBackendTransition", view_model)
+    self.assertIn("backendTransitionOrder", view_model)
+    self.assertIn("guard !isBackendInteractionBlocked else { return }", view_model)
+    self.assertIn("submitCoreMutationAndWait", view_model)
+    self.assertIn("submitCoreEngineSelectionAndWait", view_model)
+    self.assertIn(".exportAnalysisState(path: coreStateURL.path", view_model)
+    self.assertIn(".importAnalysisState(path: coreStateURL.path", view_model)
+    self.assertLess(
+      view_model.index("submitCoreEngineSelectionAndWait(.none, reason: \"coreMCTSStateImportQuiesce\")"),
+      view_model.index(".importAnalysisState(path: coreStateURL.path"),
+    )
+    self.assertIn("startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)", view_model)
+    self.assertIn("coreMutationQueueHead < coreMutationQueue.count", view_model)
+    self.assertNotIn("coreMutationQueue.removeFirst()", view_model)
+    self.assertIn("BackendTransitionView(transition: transition)", root)
+    self.assertIn(".disabled(model.isBackendInteractionBlocked)", root)
+    self.assertIn('accessibilityIdentifier("qixi-backend-transition")', root)
+    self.assertIn(".interactiveDismissDisabled(model.isBackendInteractionBlocked)", utility)
+    self.assertIn("model.handleLifecycleForeground()", app)
+    self.assertIn(".enterForeground(expectedBackendEpoch: 0)", view_model)
 
 
 if __name__ == "__main__":

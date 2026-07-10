@@ -118,6 +118,46 @@ final class FakeSwitchNativeKataGoBridge: NativeKataGoBridgeProtocol {
       throw restoreError
     }
   }
+
+  func submitCoreRequestJSON(_ requestJSON: String) throws -> String {
+    throw NSError(
+      domain: "QixiNativeKataGo",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core requests"]
+    )
+  }
+
+  func latestCoreSnapshotJSON() throws -> String {
+    throw NSError(
+      domain: "QixiNativeKataGo",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core snapshots"]
+    )
+  }
+
+  func legalMoveMaskJSON() throws -> String {
+    throw NSError(
+      domain: "QixiNativeKataGo",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement legal masks"]
+    )
+  }
+
+  func exportCoreState(to url: URL) throws {
+    throw NSError(
+      domain: "QixiNativeKataGo",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core export"]
+    )
+  }
+
+  func importCoreState(from url: URL) throws {
+    throw NSError(
+      domain: "QixiNativeKataGo",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core import"]
+    )
+  }
 }
 
 final class FakeHTTPAnalysisClient: QixiHTTPAnalysisClient {
@@ -804,8 +844,8 @@ struct AnalysisServiceSmoke {
         "native service low-memory error reports the selected model and available budget"
       )
       expect(
-        lowMemoryBridge.loadedEngineIDs == ["none"],
-        "native service clears stale native state before refusing a low-memory model load"
+        lowMemoryBridge.loadedEngineIDs.isEmpty,
+        "native service rejects a low-memory model before touching native engine state"
       )
       expect(
         lowMemoryBridge.configuredEngineIDs.isEmpty,
@@ -1085,6 +1125,7 @@ struct AnalysisServiceSmoke {
       fail("unexpected fake native switch error: \(error)")
     }
     do {
+      fakeSwitchBridge.analysisResponseJSON = loadedNativeAnalysisResponseJSON()
       let afterFailedSwitch = try await fakeSwitchService.analyze(
         moves: [],
         maxVisits: 1,
@@ -1093,16 +1134,16 @@ struct AnalysisServiceSmoke {
       )
       expect(
         afterFailedSwitch.positionKey == QixiPositionIdentity.cacheKey(
-          engine: .none,
+          engine: .b6,
           moves: [],
           komi: 7.5,
           rootNoise: 0.0
         ),
-        "native service clears currentEngine when a real-engine switch fails before bridge loading"
+        "native service preserves currentEngine when a switch fails before bridge loading"
       )
       expect(
-        fakeSwitchBridge.loadedEngineIDs == ["none", "b6", "none"],
-        "native service asks the bridge to clear stale native state before each real-engine switch"
+        fakeSwitchBridge.loadedEngineIDs == ["b6"],
+        "native service leaves the committed bridge engine untouched when target validation fails"
       )
       expect(
         fakeSwitchBridge.configuredEngineIDs == ["b6"],
@@ -1136,7 +1177,7 @@ struct AnalysisServiceSmoke {
       try await fakeRealRestoreService.restoreEngineTombstone(from: fakeRealEngineTombstoneURL, for: .b6)
       expect(
         fakeRealRestoreBridge.configuredEngineIDs == ["b6"] &&
-          fakeRealRestoreBridge.loadedEngineIDs == ["none", "b6"] &&
+          fakeRealRestoreBridge.loadedEngineIDs == ["b6"] &&
           fakeRealRestoreBridge.restoredTombstoneURLs == [fakeRealEngineTombstoneURL],
         "native service loads the requested real engine before restoring its tombstone"
       )
@@ -1164,7 +1205,7 @@ struct AnalysisServiceSmoke {
         fail("unexpected real-engine tombstone restore failure error: \(error)")
       }
       expect(
-        fakeFailingRestoreBridge.loadedEngineIDs == ["none", "b6", "none"],
+        fakeFailingRestoreBridge.loadedEngineIDs == ["b6", "none"],
         "native service clears the loaded real engine after tombstone restore failure"
       )
       let afterFailedRestore = try await fakeFailingRestoreService.analyze(
@@ -1204,22 +1245,21 @@ struct AnalysisServiceSmoke {
       } catch {
         fail("unexpected failed no-engine unload error: \(error)")
       }
-      do {
-        _ = try await failingUnloadService.analyze(
+      let afterFailedUnload = try await failingUnloadService.analyze(
+        moves: [],
+        maxVisits: 1,
+        komi: 7.5,
+        rootNoise: 0.0
+      )
+      expect(
+        afterFailedUnload.positionKey == QixiPositionIdentity.cacheKey(
+          engine: .b6,
           moves: [],
-          maxVisits: 1,
           komi: 7.5,
           rootNoise: 0.0
-        )
-        fail("native service must reject stale b6 analysis after a failed no-engine unload")
-      } catch QixiNativeKataGoServiceError.invalidRequest(let message) {
-        expect(
-          message.contains("returned engine b6 while none is loaded"),
-          "native service clears currentEngine before a no-engine unload can fail"
-        )
-      } catch {
-        fail("unexpected stale analysis after failed no-engine unload error: \(error)")
-      }
+        ),
+        "native service preserves the committed engine after a failed no-engine unload"
+      )
     } catch {
       fail("fake native service should protect state after failed no-engine unload: \(error)")
     }

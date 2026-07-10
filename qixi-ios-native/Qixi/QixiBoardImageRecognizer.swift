@@ -159,6 +159,22 @@ enum QixiBoardImageRecognizer {
     return try recognizeBoard(from: decodedImage(from: url), selection: selection)
   }
 
+  static func suggestedSelection(from url: URL) throws -> QixiBoardImageSelection {
+    try validateImportFileURL(url)
+    if let byteCount = try compressedFileByteCount(at: url) {
+      try validateInputImageByteCount(byteCount)
+    }
+    return try suggestedSelection(from: decodedImage(from: url))
+  }
+
+  static func selectionPreviewImage(from url: URL) throws -> CGImage {
+    try validateImportFileURL(url)
+    if let byteCount = try compressedFileByteCount(at: url) {
+      try validateInputImageByteCount(byteCount)
+    }
+    return try decodedImage(from: url)
+  }
+
   private static func validateImportFileURL(_ url: URL) throws {
     try rejectSymbolicLinkComponents(in: url)
     let values: URLResourceValues

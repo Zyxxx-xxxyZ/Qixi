@@ -115,7 +115,7 @@ struct QixiEngineTombstoneExportAudit: Codable, Equatable {
 }
 
 struct QixiMCTSStatePackageManifest: Codable, Equatable {
-  static let currentSchemaVersion = 1
+  static let currentSchemaVersion = 2
   static let kindValue = "qixi-mcts-state-package"
 
   var schemaVersion: Int = QixiMCTSStatePackageManifest.currentSchemaVersion
@@ -123,6 +123,7 @@ struct QixiMCTSStatePackageManifest: Codable, Equatable {
   var exportedAt: Date
   var snapshotFilename: String
   var engineTombstoneFilename: String?
+  var coreStateFilename: String?
   var selectedEngine: AnalysisEngine
   var currentPly: Int
   var mainLineCount: Int
@@ -131,6 +132,7 @@ struct QixiMCTSStatePackageManifest: Codable, Equatable {
 struct QixiImportedMCTSStatePackage {
   var snapshot: QixiAppSnapshot
   var engineTombstoneURL: URL?
+  var coreStateURL: URL?
 }
 
 enum QixiStrictJSONError: Error, Equatable, LocalizedError {
@@ -1291,8 +1293,10 @@ enum QixiMCTSStatePackageStore {
   static let manifestFilename = "manifest.json"
   static let snapshotFilename = "snapshot.json"
   static let engineTombstoneFilename = QixiEngineTombstoneStore.tombstoneFilename
+  static let coreStateFilename = "core-state.bin"
   static let maxManifestBytes = 64 * 1024
   static let maxTombstoneBytes: UInt64 = 256 * 1024 * 1024
+  static let maxCoreStateBytes: UInt64 = 512 * 1024 * 1024
 
   static func freshTemporaryPackageURL() throws -> URL {
     let url = FileManager.default.temporaryDirectory
@@ -1313,6 +1317,10 @@ enum QixiMCTSStatePackageStore {
     packageURL.appendingPathComponent(engineTombstoneFilename, isDirectory: false)
   }
 
+  static func coreStateURL(in packageURL: URL) -> URL {
+    packageURL.appendingPathComponent(coreStateFilename, isDirectory: false)
+  }
+
   static func writeSnapshot(_ snapshot: QixiAppSnapshot, to packageURL: URL) throws {
     let data = try QixiSnapshotStore.encode(snapshot)
     try data.write(to: snapshotURL(in: packageURL), options: [.atomic])
@@ -1321,6 +1329,7 @@ enum QixiMCTSStatePackageStore {
   static func writeManifest(
     snapshot: QixiAppSnapshot,
     includesEngineTombstone: Bool,
+    includesCoreState: Bool = false,
     to packageURL: URL,
     exportedAt: Date = Date()
   ) throws {
@@ -1328,6 +1337,7 @@ enum QixiMCTSStatePackageStore {
       exportedAt: exportedAt,
       snapshotFilename: snapshotFilename,
       engineTombstoneFilename: includesEngineTombstone ? engineTombstoneFilename : nil,
+      coreStateFilename: includesCoreState ? coreStateFilename : nil,
       selectedEngine: snapshot.selectedEngine,
       currentPly: snapshot.currentPly,
       mainLineCount: snapshot.mainLine.count
@@ -1384,7 +1394,26 @@ enum QixiMCTSStatePackageStore {
     } else {
       tombstoneURL = nil
     }
-    return QixiImportedMCTSStatePackage(snapshot: snapshot, engineTombstoneURL: tombstoneURL)
+
+    let importedCoreStateURL: URL?
+    if let coreFilename = manifest.coreStateFilename {
+      guard coreFilename == coreStateFilename else {
+        throw QixiStrictJSONError.malformed(
+          label: "Qixi MCTS state package",
+          message: "uses an unexpected core state filename"
+        )
+      }
+      let url = coreStateURL(in: packageURL)
+      try validateCoreStateURL(url)
+      importedCoreStateURL = url
+    } else {
+      importedCoreStateURL = nil
+    }
+    return QixiImportedMCTSStatePackage(
+      snapshot: snapshot,
+      engineTombstoneURL: tombstoneURL,
+      coreStateURL: importedCoreStateURL
+    )
   }
 
   private static func loadManifest(from packageURL: URL) throws -> QixiMCTSStatePackageManifest {
@@ -1396,7 +1425,7 @@ enum QixiMCTSStatePackageStore {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     let manifest = try decoder.decode(QixiMCTSStatePackageManifest.self, from: data)
-    guard manifest.schemaVersion == QixiMCTSStatePackageManifest.currentSchemaVersion,
+    guard (manifest.schemaVersion == 1 || manifest.schemaVersion == QixiMCTSStatePackageManifest.currentSchemaVersion),
           manifest.kind == QixiMCTSStatePackageManifest.kindValue else {
       throw QixiStrictJSONError.malformed(
         label: "Qixi MCTS state manifest",
@@ -1425,6 +1454,20 @@ enum QixiMCTSStatePackageStore {
     guard byteCount > 0 && byteCount <= maxTombstoneBytes else {
       throw QixiStrictJSONError.malformed(
         label: "Qixi native engine tombstone",
+        message: "has an invalid byte count"
+      )
+    }
+  }
+
+  private static func validateCoreStateURL(_ url: URL) throws {
+    let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+    guard values.isSymbolicLink != true, values.isRegularFile == true else {
+      throw QixiStrictJSONError.notRegularFile(label: "Qixi core MCTS state", path: url.path)
+    }
+    let byteCount = UInt64(max(0, values.fileSize ?? 0))
+    guard byteCount > 0 && byteCount <= maxCoreStateBytes else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi core MCTS state",
         message: "has an invalid byte count"
       )
     }

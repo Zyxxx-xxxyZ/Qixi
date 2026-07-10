@@ -47,6 +47,18 @@ private enum QixiAutomationEvidenceError: Error, LocalizedError {
   }
 }
 
+private struct QixiCoreBarrierError: Error, LocalizedError {
+  let operation: String
+  let backendMessage: String?
+
+  var errorDescription: String? {
+    if let backendMessage, !backendMessage.isEmpty {
+      return "Qixi core \(operation) failed: \(backendMessage)"
+    }
+    return "Qixi core \(operation) failed."
+  }
+}
+
 private enum QixiAutomationEvidenceExportTrigger {
   case analysis
   case launch
@@ -79,6 +91,42 @@ private struct QixiNextMoveOverlayContext: Equatable {
 
   var pointID: Int {
     y * 19 + x
+  }
+}
+
+private enum QixiQueuedCoreOperation {
+  case request(QixiCoreRequest)
+  case selectEngine(AnalysisEngine)
+}
+
+private struct QixiPendingCoreMutation {
+  var operation: QixiQueuedCoreOperation
+  var reason: String
+  var optimisticVariationNodeID: String?
+  var uiIntentID: UInt64?
+  var completion: (@MainActor (Bool) -> Void)?
+}
+
+enum QixiBackendTransition: Equatable {
+  case restoringState
+  case switchingEngine
+  case exportingState
+  case importingState
+  case installingModel
+
+  var statusText: String {
+    switch self {
+    case .restoringState:
+      return L10n.text(.backendRestoringState)
+    case .switchingEngine:
+      return L10n.text(.backendLoadingEngine)
+    case .exportingState:
+      return L10n.text(.mctsStateExporting)
+    case .importingState:
+      return L10n.text(.mctsStateImporting)
+    case .installingModel:
+      return L10n.text(.backendInstallingModel)
+    }
   }
 }
 
@@ -153,6 +201,7 @@ final class QixiViewModel: ObservableObject {
   @Published private(set) var lastSaveError: String?
   @Published private(set) var lastEngineError: String?
   @Published private(set) var syncStatus = QixiSyncStatus()
+  @Published private(set) var backendTransition: QixiBackendTransition? = nil
   @Published var language: AppLanguage = AppLanguage.current
   @Published var onboardingCompleted: Bool = false
   @Published var iCloudSyncEnabled: Bool = false
@@ -185,6 +234,48 @@ final class QixiViewModel: ObservableObject {
   private var isApplyingSnapshot = false
   private var hasExportedAutomationRealDeviceEvidence = false
   private var memorySampler: QixiMemorySampler?
+  private var coreBackendEpoch: UInt64 = 0
+  private var coreRevision: UInt64 = 0
+  private var coreCurrentRootID: UInt32 = 0
+  private var coreNextIntentID: UInt64 = 1
+  private var corePendingMutationCount = 0
+  private var coreMutationQueue: [QixiPendingCoreMutation] = []
+  private var coreMutationQueueHead = 0
+  private var coreMutationPumpTask: Task<Void, Never>?
+  private var backendTransitionOrder: [UInt64] = []
+  private var backendTransitionsByToken: [UInt64: QixiBackendTransition] = [:]
+  private var nextBackendTransitionToken: UInt64 = 1
+  private var lifecycleCheckpointPending = false
+  private var enteredBackgroundSinceLastForeground = false
+  private var coreQualityDeltaByVariationNodeID: [String: Double] = [:]
+  private var coreRootReferenceByVariationNodeID: [String: QixiCoreRootReference] = [
+    QixiViewModel.variationRootID: .node(0)
+  ]
+
+  private var coreBackendService: (any QixiCoreBackendService)? {
+    analysisService as? any QixiCoreBackendService
+  }
+
+  var isBackendInteractionBlocked: Bool {
+    backendTransition != nil
+  }
+
+  @discardableResult
+  private func beginBackendTransition(_ transition: QixiBackendTransition) -> UInt64 {
+    let token = nextBackendTransitionToken
+    nextBackendTransitionToken &+= 1
+    precondition(nextBackendTransitionToken != 0, "backend transition token overflow")
+    backendTransitionOrder.append(token)
+    backendTransitionsByToken[token] = transition
+    backendTransition = transition
+    return token
+  }
+
+  private func finishBackendTransition(_ token: UInt64?) {
+    guard let token, backendTransitionsByToken.removeValue(forKey: token) != nil else { return }
+    backendTransitionOrder.removeAll { $0 == token }
+    backendTransition = backendTransitionOrder.last.flatMap { backendTransitionsByToken[$0] }
+  }
 
   init(analysisService: (any QixiAnalysisService)? = nil) {
     let processEnvironment = ProcessInfo.processInfo.environment
@@ -261,8 +352,9 @@ final class QixiViewModel: ObservableObject {
     if !wroteAutomationLifecycleTombstone {
       saveSoon(reason: "launchReady")
     }
+    let launchTransitionToken = beginBackendTransition(.restoringState)
     Task { [self] in
-      await resumeAnalysisAfterLaunch()
+      await resumeAnalysisAfterLaunch(transitionToken: launchTransitionToken)
     }
     memorySampler = QixiMemorySampler { [weak self] in
       self?.memoryTelemetryContext() ?? QixiMemoryTelemetryContext.empty
@@ -274,6 +366,7 @@ final class QixiViewModel: ObservableObject {
   deinit {
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
+    coreMutationPumpTask?.cancel()
     saveTask?.cancel()
     syncTask?.cancel()
     engineTombstoneTask?.cancel()
@@ -350,6 +443,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func resetVariationTree(from moves: [BoardMove], currentPly: Int) {
+    coreQualityDeltaByVariationNodeID = [:]
     variationRecords = [
       Self.variationRootID: QixiVariationNodeRecord(
         id: Self.variationRootID,
@@ -485,8 +579,11 @@ final class QixiViewModel: ObservableObject {
 
   private func variationQualityDelta(for record: QixiVariationNodeRecord) -> Double? {
     guard let move = record.move, !move.isPass, let x = move.x, let y = move.y else { return nil }
-    guard selectedEngine != .none,
-          let parentID = record.parentID,
+    guard selectedEngine != .none else { return nil }
+    if coreBackendService != nil {
+      return coreQualityDeltaByVariationNodeID[record.id]
+    }
+    guard let parentID = record.parentID,
           let parentCache = cachedVariationAnalysis(for: parentID),
           let bestWinrate = Self.bestWinrate(in: parentCache.candidates) else {
       return nil
@@ -542,26 +639,79 @@ final class QixiViewModel: ObservableObject {
   }
 
   func selectEngine(_ engine: AnalysisEngine) {
+    guard !isBackendInteractionBlocked else { return }
+    let previousEngine = selectedEngine
+    let transitionToken = beginBackendTransition(.switchingEngine)
     saveNow(reason: "beforeEngineSwitch")
     analysisTask?.cancel()
     selectedEngine = engine
+    if let coreBackendService {
+      hermesStatus = .loading
+      saveNow(reason: engine == .none ? "engineNone" : "engineSelected")
+      if engine == .none {
+        submitCoreEngineSelection(engine, reason: "coreEngineUnloaded") { [weak self] success in
+          guard let self else { return }
+          self.finishBackendTransition(transitionToken)
+          guard self.selectedEngine == .none else { return }
+          if !success {
+            let failure = self.lastEngineError
+            self.selectedEngine = previousEngine
+            self.saveNow(reason: "engineSelectionRolledBack")
+            if previousEngine != .none {
+              self.startCoreSnapshotPolling(
+                engine: previousEngine,
+                assumesEngineAlreadyLoaded: true,
+                coreBackendService: coreBackendService,
+                preservedEngineError: failure
+              )
+            }
+            return
+          }
+          self.lastEngineError = nil
+          self.hermesStatus = .ready
+        }
+      } else {
+        startCoreSnapshotPolling(
+          engine: engine,
+          assumesEngineAlreadyLoaded: false,
+          coreBackendService: coreBackendService,
+          transitionToken: transitionToken,
+          rollbackEngine: previousEngine
+        )
+      }
+      return
+    }
     if engine == .none {
       hermesStatus = .loading
       saveNow(reason: "engineNone")
       analysisTask = Task { [weak self, analysisService] in
+        guard let self else { return }
         do {
+          await self.waitForCoreMutationDrain()
           _ = try await analysisService.setEngine(.none)
           try Task.checkCancellation()
-          guard let self, self.selectedEngine == .none else { return }
+          self.finishBackendTransition(transitionToken)
+          guard self.selectedEngine == .none else { return }
           self.lastEngineError = nil
           self.hermesStatus = .ready
           self.recordRuntimeDiagnostic(event: "engineUnloaded", success: true, message: "Selected engine none.")
         } catch {
+          self.finishBackendTransition(transitionToken)
           guard !Task.isCancelled else { return }
-          guard let self, self.selectedEngine == .none else { return }
-          self.lastEngineError = self.localizedEngineError(error, fallbackKey: .engineErrorUnloadFailed)
+          guard self.selectedEngine == .none else { return }
+          let failure = self.localizedEngineError(error, fallbackKey: .engineErrorUnloadFailed)
+          self.lastEngineError = failure
           self.hermesStatus = .offline
           self.recordRuntimeDiagnostic(event: "engineUnloadFailed", success: false, message: String(describing: error))
+          self.selectedEngine = previousEngine
+          self.saveNow(reason: "engineSelectionRolledBack")
+          if previousEngine != .none {
+            self.startAnalysis(
+              engine: previousEngine,
+              assumesEngineAlreadyLoaded: true,
+              preservedEngineError: failure
+            )
+          }
         }
       }
       return
@@ -569,13 +719,32 @@ final class QixiViewModel: ObservableObject {
 
     saveNow(reason: "engineSelected")
     recordRuntimeDiagnostic(event: "engineSelected", success: true, message: "Selected engine \(engine.rawValue).")
-    startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)
+    startAnalysis(
+      engine: engine,
+      assumesEngineAlreadyLoaded: false,
+      transitionToken: transitionToken,
+      rollbackEngine: previousEngine
+    )
   }
 
   private func startAnalysis(
     engine: AnalysisEngine,
-    assumesEngineAlreadyLoaded: Bool
+    assumesEngineAlreadyLoaded: Bool,
+    transitionToken: UInt64? = nil,
+    rollbackEngine: AnalysisEngine? = nil,
+    preservedEngineError: String? = nil
   ) {
+    if let coreBackendService {
+      startCoreSnapshotPolling(
+        engine: engine,
+        assumesEngineAlreadyLoaded: assumesEngineAlreadyLoaded,
+        coreBackendService: coreBackendService,
+        transitionToken: transitionToken,
+        rollbackEngine: rollbackEngine,
+        preservedEngineError: preservedEngineError
+      )
+      return
+    }
     analysisTask?.cancel()
     analysisGeneration += 1
     let generation = analysisGeneration
@@ -600,15 +769,19 @@ final class QixiViewModel: ObservableObject {
     }
     analysisTask = Task { [weak self] in
       guard let self else { return }
+      var engineLoadCommitted = assumesEngineAlreadyLoaded
       do {
         if !assumesEngineAlreadyLoaded {
+          await waitForCoreMutationDrain()
           let status = try await analysisService.setEngine(engine)
           recordRuntimeDiagnostic(
             event: "backendSetEngine",
             success: true,
             message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state)"
           )
+          engineLoadCommitted = true
         }
+        finishBackendTransition(transitionToken)
         var round = 0
         var visitBatch = Self.realtimeAnalysisInitialVisitBatch
         var targetVisits = Self.nextRealtimeAnalysisTarget(after: restoredVisits, batch: visitBatch)
@@ -650,7 +823,7 @@ final class QixiViewModel: ObservableObject {
             recordDiagnostic: shouldRecordDiagnostic,
             scheduleSave: shouldAutosave
           )
-          lastEngineError = nil
+          lastEngineError = preservedEngineError
           hermesStatus = .ready
           let observedVisits = didApply
             ? responseRootVisits(response)
@@ -668,7 +841,24 @@ final class QixiViewModel: ObservableObject {
           )
         }
       } catch {
+        finishBackendTransition(transitionToken)
         guard !Task.isCancelled else { return }
+        if !engineLoadCommitted, let rollbackEngine {
+          let failure = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
+          selectedEngine = rollbackEngine
+          lastEngineError = failure
+          saveNow(reason: "engineSelectionRolledBack")
+          if rollbackEngine != .none {
+            startAnalysis(
+              engine: rollbackEngine,
+              assumesEngineAlreadyLoaded: true,
+              preservedEngineError: failure
+            )
+          } else {
+            hermesStatus = .offline
+          }
+          return
+        }
         guard generation == analysisGeneration,
               requestIdentity.matches(
                 engine: selectedEngine,
@@ -683,6 +873,79 @@ final class QixiViewModel: ObservableObject {
         lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
         hermesStatus = .offline
         recordRuntimeDiagnostic(event: "analysisFailed", success: false, message: String(describing: error))
+      }
+    }
+  }
+
+  private func startCoreSnapshotPolling(
+    engine: AnalysisEngine,
+    assumesEngineAlreadyLoaded: Bool,
+    coreBackendService: any QixiCoreBackendService,
+    transitionToken: UInt64? = nil,
+    rollbackEngine: AnalysisEngine? = nil,
+    preservedEngineError: String? = nil
+  ) {
+    analysisTask?.cancel()
+    analysisGeneration += 1
+    let generation = analysisGeneration
+    if !assumesEngineAlreadyLoaded {
+      hermesStatus = .loading
+      submitCoreEngineSelection(engine, reason: "coreEngineSelected") { [weak self] success in
+        guard let self else { return }
+        self.finishBackendTransition(transitionToken)
+        guard self.analysisGeneration == generation,
+              self.selectedEngine == engine else { return }
+        if !success {
+          let failure = self.lastEngineError
+          if let rollbackEngine {
+            self.selectedEngine = rollbackEngine
+            self.saveNow(reason: "engineSelectionRolledBack")
+            if rollbackEngine != .none {
+              self.startCoreSnapshotPolling(
+                engine: rollbackEngine,
+                assumesEngineAlreadyLoaded: true,
+                coreBackendService: coreBackendService,
+                preservedEngineError: failure
+              )
+            }
+          }
+          return
+        }
+        self.startCoreSnapshotPolling(
+          engine: engine,
+          assumesEngineAlreadyLoaded: true,
+          coreBackendService: coreBackendService
+        )
+      }
+      return
+    }
+    finishBackendTransition(transitionToken)
+    analysisTask = Task { [weak self, coreBackendService] in
+      guard let self else { return }
+      do {
+        var lastAppliedRevision: UInt64 = 0
+        while true {
+          try Task.checkCancellation()
+          guard generation == analysisGeneration, selectedEngine == engine else { return }
+          let result = try await coreBackendService.latestCoreSnapshot()
+          try Task.checkCancellation()
+          guard generation == analysisGeneration, selectedEngine == engine else { return }
+          if result.revision != lastAppliedRevision {
+            applyCoreBackendResult(result, reason: "snapshotPoll", allowWhileMutationsPending: false)
+            if let preservedEngineError {
+              lastEngineError = preservedEngineError
+              hermesStatus = result.engineState == "ready" ? .ready : .offline
+            }
+            lastAppliedRevision = result.revision
+          }
+          try await Task.sleep(nanoseconds: 8_333_333)
+        }
+      } catch {
+        guard !Task.isCancelled else { return }
+        guard generation == analysisGeneration, selectedEngine == engine else { return }
+        lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
+        hermesStatus = .offline
+        recordRuntimeDiagnostic(event: "coreSnapshotPollingFailed", success: false, message: String(describing: error))
       }
     }
   }
@@ -720,6 +983,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   func step(by delta: Int) {
+    guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
     currentPly = min(max(0, currentPly + delta), mainLine.count)
     currentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
@@ -730,10 +994,24 @@ final class QixiViewModel: ObservableObject {
       clearVisibleAnalysisAndRefreshAnchor()
     }
     saveSoon(reason: "step")
+    if coreBackendService != nil {
+      if let target = coreRootReferenceByVariationNodeID[currentVariationNodeID] {
+        submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreStep")
+      } else {
+        let steps = abs(delta)
+        guard steps > 0 else { return }
+        submitCoreMutation(
+          delta < 0 ? .undo(steps: steps, expectedBackendEpoch: 0) : .redo(steps: steps, expectedBackendEpoch: 0),
+          reason: "coreStep"
+        )
+      }
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
   func jump(to ply: Int) {
+    guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
     currentPly = min(max(0, ply), mainLine.count)
     currentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
@@ -744,10 +1022,17 @@ final class QixiViewModel: ObservableObject {
       clearVisibleAnalysisAndRefreshAnchor()
     }
     saveSoon(reason: "jump")
+    if coreBackendService != nil {
+      if let target = coreRootReferenceByVariationNodeID[currentVariationNodeID] {
+        submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreJump")
+      }
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
   func jump(toVariationNode nodeID: String) {
+    guard !isBackendInteractionBlocked else { return }
     guard variationRecords[nodeID] != nil else { return }
     invalidateActiveAnalysisForPositionChange()
     syncCurrentLine(to: nodeID, includePrimaryContinuation: true)
@@ -758,18 +1043,45 @@ final class QixiViewModel: ObservableObject {
       clearVisibleAnalysisAndRefreshAnchor()
     }
     saveSoon(reason: "variationJump")
+    if coreBackendService != nil {
+      if let target = coreRootReferenceByVariationNodeID[nodeID] {
+        submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreVariationJump")
+      }
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
   func passMove() {
+    guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
+    let parentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
+    let parentRoot = coreRootReferenceByVariationNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
+    let intentID = nextCoreIntentID()
     appendVariationMove(BoardMove(pass: nextColor))
+    let optimisticNodeID = currentVariationNodeID
+    coreRootReferenceByVariationNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
     saveSoon(reason: "passMove")
+    if coreBackendService != nil {
+      submitCoreMutation(
+        .playMove(
+          move: 361,
+          uiIntentId: intentID,
+          parentRoot: parentRoot,
+          expectedBackendEpoch: 0
+        ),
+        reason: "corePassMove",
+        optimisticVariationNodeID: optimisticNodeID,
+        uiIntentID: intentID
+      )
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
   func play(at x: Int, y: Int) {
+    guard !isBackendInteractionBlocked else { return }
     guard x >= 0, x < 19, y >= 0, y < 19 else { return }
     guard QixiBoardPosition.isLegalMove(
       after: boardMoves,
@@ -779,9 +1091,28 @@ final class QixiViewModel: ObservableObject {
       color: nextColor
     ) else { return }
     invalidateActiveAnalysisForPositionChange()
+    let parentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
+    let parentRoot = coreRootReferenceByVariationNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
+    let intentID = nextCoreIntentID()
     appendVariationMove(BoardMove(color: nextColor, x: x, y: y))
+    let optimisticNodeID = currentVariationNodeID
+    coreRootReferenceByVariationNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
     saveSoon(reason: "play")
+    if coreBackendService != nil {
+      submitCoreMutation(
+        .playMove(
+          move: coreMoveIndex(x: x, y: y),
+          uiIntentId: intentID,
+          parentRoot: parentRoot,
+          expectedBackendEpoch: 0
+        ),
+        reason: "corePlay",
+        optimisticVariationNodeID: optimisticNodeID,
+        uiIntentID: intentID
+      )
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
@@ -977,6 +1308,174 @@ final class QixiViewModel: ObservableObject {
     )
   }
 
+  private func submitCoreMutation(
+    _ request: QixiCoreRequest,
+    reason: String,
+    optimisticVariationNodeID: String? = nil,
+    uiIntentID: UInt64? = nil,
+    completion: (@MainActor (Bool) -> Void)? = nil
+  ) {
+    guard let coreBackendService else {
+      completion?(false)
+      requestAnalysisIfNeeded()
+      return
+    }
+    coreMutationQueue.append(
+      QixiPendingCoreMutation(
+        operation: .request(request),
+        reason: reason,
+        optimisticVariationNodeID: optimisticVariationNodeID,
+        uiIntentID: uiIntentID,
+        completion: completion
+      )
+    )
+    corePendingMutationCount += 1
+    startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
+  }
+
+  private func submitCoreEngineSelection(
+    _ engine: AnalysisEngine,
+    reason: String,
+    completion: (@MainActor (Bool) -> Void)? = nil
+  ) {
+    guard let coreBackendService else {
+      completion?(false)
+      return
+    }
+    coreMutationQueue.append(
+      QixiPendingCoreMutation(
+        operation: .selectEngine(engine),
+        reason: reason,
+        optimisticVariationNodeID: nil,
+        uiIntentID: nil,
+        completion: completion
+      )
+    )
+    corePendingMutationCount += 1
+    startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
+  }
+
+  private func startCoreMutationPumpIfNeeded(
+    coreBackendService: any QixiCoreBackendService
+  ) {
+    guard coreMutationPumpTask == nil else { return }
+    coreMutationPumpTask = Task { @MainActor [weak self, coreBackendService] in
+      guard let self else { return }
+      await self.runCoreMutationPump(coreBackendService: coreBackendService)
+    }
+  }
+
+  private func submitCoreMutationAndWait(
+    _ request: QixiCoreRequest,
+    reason: String
+  ) async throws {
+    let succeeded = await withCheckedContinuation { continuation in
+      submitCoreMutation(request, reason: reason) { success in
+        continuation.resume(returning: success)
+      }
+    }
+    guard succeeded else {
+      throw QixiCoreBarrierError(operation: reason, backendMessage: lastEngineError)
+    }
+  }
+
+  private func submitCoreEngineSelectionAndWait(
+    _ engine: AnalysisEngine,
+    reason: String
+  ) async throws {
+    let succeeded = await withCheckedContinuation { continuation in
+      submitCoreEngineSelection(engine, reason: reason) { success in
+        continuation.resume(returning: success)
+      }
+    }
+    guard succeeded else {
+      throw QixiCoreBarrierError(operation: reason, backendMessage: lastEngineError)
+    }
+  }
+
+  private func runCoreMutationPump(coreBackendService: any QixiCoreBackendService) async {
+    defer {
+      coreMutationPumpTask = nil
+      if coreMutationQueueHead >= coreMutationQueue.count {
+        coreMutationQueue.removeAll(keepingCapacity: true)
+        coreMutationQueueHead = 0
+      } else {
+        startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
+      }
+    }
+    while coreMutationQueueHead < coreMutationQueue.count {
+      guard !Task.isCancelled else { return }
+      let pending = coreMutationQueue[coreMutationQueueHead]
+      coreMutationQueueHead += 1
+      do {
+        let result: QixiCoreBackendResult
+        switch pending.operation {
+        case .request(let queuedRequest):
+          let request = queuedRequest.replacingExpectedBackendEpoch(coreBackendEpoch)
+          result = try await coreBackendService.submitCoreRequest(request)
+        case .selectEngine(let engine):
+          let status = try await analysisService.setEngine(engine)
+          recordRuntimeDiagnostic(
+            event: "coreBackendSetEngine",
+            success: true,
+            message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state)"
+          )
+          result = try await coreBackendService.latestCoreSnapshot()
+        }
+        corePendingMutationCount = max(0, corePendingMutationCount - 1)
+        if !result.ok {
+          await recoverFromCoreMutationFailure(
+            message: result.message,
+            coreBackendService: coreBackendService
+          )
+          pending.completion?(false)
+          return
+        }
+        if let intentID = pending.uiIntentID,
+           result.committedUiIntentId == intentID,
+           let optimisticNodeID = pending.optimisticVariationNodeID {
+          coreRootReferenceByVariationNodeID[optimisticNodeID] = result.snapshot.map {
+            .lineage($0.rootLineageHash)
+          } ?? .node(result.currentRoot)
+        }
+        applyCoreBackendResult(result, reason: pending.reason, allowWhileMutationsPending: false)
+        saveSoon(reason: pending.reason)
+        pending.completion?(true)
+      } catch {
+        corePendingMutationCount = max(0, corePendingMutationCount - 1)
+        await recoverFromCoreMutationFailure(
+          message: localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed),
+          coreBackendService: coreBackendService
+        )
+        pending.completion?(false)
+        return
+      }
+    }
+    coreMutationQueue.removeAll(keepingCapacity: true)
+    coreMutationQueueHead = 0
+  }
+
+  private func recoverFromCoreMutationFailure(
+    message: String,
+    coreBackendService: any QixiCoreBackendService
+  ) async {
+    let abandoned = Array(coreMutationQueue[coreMutationQueueHead...])
+    corePendingMutationCount = max(0, corePendingMutationCount - abandoned.count)
+    coreMutationQueue.removeAll(keepingCapacity: true)
+    coreMutationQueueHead = 0
+    for pending in abandoned {
+      pending.completion?(false)
+    }
+    lastEngineError = message
+    hermesStatus = .offline
+    recordRuntimeDiagnostic(event: "coreMutationFailed", success: false, message: message)
+    if let result = try? await coreBackendService.latestCoreSnapshot() {
+      applyCoreBackendResult(result, reason: "coreMutationRollback", allowWhileMutationsPending: true)
+      lastEngineError = message
+      hermesStatus = result.engineState == "ready" || result.engineState == "none" ? .ready : .offline
+    }
+  }
+
   func saveNow(reason: String = "manual") {
     saveTask?.cancel()
     let snapshot = currentSnapshot(reason: reason)
@@ -993,6 +1492,8 @@ final class QixiViewModel: ObservableObject {
 
   func handleLifecycleTombstone(reason: String) {
     memorySampler?.recordLifecycle(reason: reason)
+    let shouldQueueBackendCheckpoint = !enteredBackgroundSinceLastForeground
+    enteredBackgroundSinceLastForeground = true
     saveTask?.cancel()
     let snapshot = currentSnapshot(reason: reason)
     do {
@@ -1002,10 +1503,41 @@ final class QixiViewModel: ObservableObject {
         reason: reason,
         engineTombstoneFilename: engineTombstoneFilenameIfSupported()
       )
-      exportEngineTombstoneIfSupported(reason: reason)
+      if coreBackendService != nil && shouldQueueBackendCheckpoint && !lifecycleCheckpointPending {
+        lifecycleCheckpointPending = true
+        let backgroundTask = QixiEngineTombstoneBackgroundTask(name: "QixiCoreCheckpoint") {}
+        let remaining = UIApplication.shared.backgroundTimeRemaining
+        let deadlineMs: UInt32 = remaining.isFinite
+          ? UInt32(max(0, min(Double(UInt32.max), remaining * 1_000)))
+          : 30_000
+        submitCoreMutation(
+          .enterBackground(deadlineMs: deadlineMs, expectedBackendEpoch: 0),
+          reason: "coreLifecycleCheckpoint",
+          completion: { [weak self] _ in
+            self?.lifecycleCheckpointPending = false
+            backgroundTask.end()
+          }
+        )
+      } else if coreBackendService == nil && shouldQueueBackendCheckpoint {
+        exportEngineTombstoneIfSupported(reason: reason)
+      }
     } catch {
       lastSaveError = String(describing: error)
     }
+  }
+
+  func handleLifecycleForeground() {
+    guard enteredBackgroundSinceLastForeground else { return }
+    enteredBackgroundSinceLastForeground = false
+    guard coreBackendService != nil else { return }
+    let transitionToken = beginBackendTransition(.restoringState)
+    submitCoreMutation(
+      .enterForeground(expectedBackendEpoch: 0),
+      reason: "coreLifecycleForeground",
+      completion: { [weak self] _ in
+        self?.finishBackendTransition(transitionToken)
+      }
+    )
   }
 
   @discardableResult
@@ -1038,6 +1570,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   func syncNow() {
+    guard !isBackendInteractionBlocked else { return }
     let wasSyncEnabled = iCloudSyncEnabled
     let localSnapshot: QixiAppSnapshot?
     do {
@@ -1092,7 +1625,13 @@ final class QixiViewModel: ObservableObject {
     onboardingCompleted = true
     UserDefaults.standard.set(true, forKey: QixiPreferences.onboardingCompletedKey)
     if enableICloud {
-      syncNow()
+      Task { [weak self] in
+        guard let self else { return }
+        while self.isBackendInteractionBlocked {
+          try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        self.syncNow()
+      }
     } else {
       setICloudSyncEnabled(false)
       saveNow(reason: "onboardingCompleted")
@@ -1104,15 +1643,19 @@ final class QixiViewModel: ObservableObject {
   }
 
   func openUtilitySheet(_ sheet: QixiUtilitySheet) {
+    guard !isBackendInteractionBlocked else { return }
     utilitySheet = sheet
   }
 
   func newGame() {
+    guard !isBackendInteractionBlocked else { return }
+    let transitionToken = beginBackendTransition(.exportingState)
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
     let snapshotToArchive = currentSnapshot(reason: "newGameMCTSStateArchive")
     Task { [weak self] in
       guard let self else { return }
+      defer { self.finishBackendTransition(transitionToken) }
       await archiveCurrentMCTSStateBeforeReset(snapshotToArchive, reason: "newGameMCTSStateArchive")
       resetForNewGame()
     }
@@ -1127,10 +1670,18 @@ final class QixiViewModel: ObservableObject {
     clearVisibleAnalysisAndRefreshAnchor()
     analysisByEngine = [:]
     saveNow(reason: "newGame")
+    if coreBackendService != nil {
+      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      submitCoreMutation(.newGame(komi: komi, nextPla: .black, expectedBackendEpoch: 0), reason: "coreNewGame")
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
   func importSGF(text: String) throws {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "SGF import", backendMessage: "another backend transition is active")
+    }
     let importedMoves = try QixiSGFParser.parseValidatedMainLineMoves(from: text)
     invalidateActiveAnalysisForPositionChange()
     mainLine = importedMoves
@@ -1141,6 +1692,35 @@ final class QixiViewModel: ObservableObject {
     analysisByEngine = [:]
     refreshLocalChartAnchor()
     saveNow(reason: "sgfImport")
+    if coreBackendService != nil {
+      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      submitCoreMutation(
+        .newGame(komi: komi, nextPla: importedMoves.first?.color ?? .black, expectedBackendEpoch: 0),
+        reason: "coreSGFImportReset"
+      )
+      var parent: QixiCoreRootReference = .node(0)
+      for (index, move) in importedMoves.enumerated() {
+        let intentID = nextCoreIntentID()
+        let nodeID = currentVariationPathNodeIDs[index + 1]
+        coreRootReferenceByVariationNodeID[nodeID] = .intent(intentID)
+        let coreMove = move.isPass
+          ? 361
+          : coreMoveIndex(x: move.x ?? -1, y: move.y ?? -1)
+        submitCoreMutation(
+          .playMove(
+            move: coreMove,
+            uiIntentId: intentID,
+            parentRoot: parent,
+            expectedBackendEpoch: 0
+          ),
+          reason: "coreSGFImportMove",
+          optimisticVariationNodeID: nodeID,
+          uiIntentID: intentID
+        )
+        parent = .intent(intentID)
+      }
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
@@ -1194,12 +1774,28 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func makeMCTSStatePackage(snapshot: QixiAppSnapshot, reason: String) async throws -> URL {
+    let transitionToken = beginBackendTransition(.exportingState)
+    defer { finishBackendTransition(transitionToken) }
+    await Task.yield()
+    var packageSnapshot = snapshot
+    if coreBackendService != nil {
+      await waitForCoreMutationDrain()
+      packageSnapshot = currentSnapshot(reason: reason)
+    }
     let packageURL = try QixiMCTSStatePackageStore.freshTemporaryPackageURL()
     do {
-      try QixiMCTSStatePackageStore.writeSnapshot(snapshot, to: packageURL)
+      try QixiMCTSStatePackageStore.writeSnapshot(packageSnapshot, to: packageURL)
       var includesEngineTombstone = false
-      if selectedEngine != .none,
-         let engineTombstoneService = analysisService as? any QixiEngineTombstoneService {
+      var includesCoreState = false
+      if coreBackendService != nil {
+        let coreStateURL = QixiMCTSStatePackageStore.coreStateURL(in: packageURL)
+        try await submitCoreMutationAndWait(
+          .exportAnalysisState(path: coreStateURL.path, expectedBackendEpoch: 0),
+          reason: "coreMCTSStateExport"
+        )
+        includesCoreState = true
+      } else if selectedEngine != .none,
+                let engineTombstoneService = analysisService as? any QixiEngineTombstoneService {
         try await engineTombstoneService.exportEngineTombstone(
           to: QixiMCTSStatePackageStore.engineTombstoneURL(in: packageURL)
         )
@@ -1207,8 +1803,9 @@ final class QixiViewModel: ObservableObject {
         includesEngineTombstone = true
       }
       try QixiMCTSStatePackageStore.writeManifest(
-        snapshot: snapshot,
+        snapshot: packageSnapshot,
         includesEngineTombstone: includesEngineTombstone,
+        includesCoreState: includesCoreState,
         to: packageURL
       )
       return packageURL
@@ -1218,10 +1815,83 @@ final class QixiViewModel: ObservableObject {
     }
   }
 
+  private func waitForCoreMutationDrain() async {
+    while let task = coreMutationPumpTask {
+      await task.value
+    }
+  }
+
   func importMCTSStatePackage(from packageURL: URL) async throws {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "MCTS state import", backendMessage: "another backend transition is active")
+    }
+    let transitionToken = beginBackendTransition(.importingState)
+    defer { finishBackendTransition(transitionToken) }
+    await Task.yield()
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
+    await waitForCoreMutationDrain()
     let imported = try QixiMCTSStatePackageStore.loadPackage(from: packageURL)
+    if let coreStateURL = imported.coreStateURL {
+      guard let coreBackendService else {
+        throw QixiStrictJSONError.malformed(
+          label: "Qixi MCTS state package",
+          message: "contains core MCTS state but this build cannot restore it"
+        )
+      }
+      hermesStatus = .loading
+      let previousEngine = selectedEngine
+      do {
+        try await submitCoreEngineSelectionAndWait(.none, reason: "coreMCTSStateImportQuiesce")
+        try await submitCoreMutationAndWait(
+          .importAnalysisState(path: coreStateURL.path, expectedBackendEpoch: 0),
+          reason: "coreMCTSStateImport"
+        )
+      } catch {
+        if previousEngine != .none {
+          try? await submitCoreEngineSelectionAndWait(
+            previousEngine,
+            reason: "coreMCTSStateImportRollbackEngine"
+          )
+        }
+        throw error
+      }
+      apply(snapshot: imported.snapshot)
+      try persist(imported.snapshot)
+      try await submitCoreMutationAndWait(
+        .setKomi(komi, expectedBackendEpoch: 0),
+        reason: "coreMCTSStateImportKomi"
+      )
+      try await submitCoreMutationAndWait(
+        .setWideRootNoise(rootNoise, expectedBackendEpoch: 0),
+        reason: "coreMCTSStateImportRootNoise"
+      )
+      if imported.snapshot.selectedEngine != .none {
+        do {
+          try await submitCoreEngineSelectionAndWait(
+            imported.snapshot.selectedEngine,
+            reason: "coreMCTSStateImportEngine"
+          )
+        } catch {
+          lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
+          hermesStatus = .offline
+          lastSaveError = nil
+          saveSoon(reason: "mctsStateImportEngineUnavailable")
+          return
+        }
+      }
+      let result = try await coreBackendService.latestCoreSnapshot()
+      applyCoreBackendResult(result, reason: "coreMCTSStateImport", allowWhileMutationsPending: true)
+      lastEngineError = nil
+      lastSaveError = nil
+      if selectedEngine != .none {
+        startAnalysis(engine: selectedEngine, assumesEngineAlreadyLoaded: true)
+      } else {
+        hermesStatus = .ready
+      }
+      saveSoon(reason: "mctsStateImport")
+      return
+    }
     var didRestoreEngineTombstone = false
     if let tombstoneURL = imported.engineTombstoneURL {
       guard let engineTombstoneService = analysisService as? any QixiEngineTombstoneService else {
@@ -1237,7 +1907,6 @@ final class QixiViewModel: ObservableObject {
       try QixiEngineTombstoneStore.markExported(engine: imported.snapshot.selectedEngine, reason: "manualMCTSStateImport")
       didRestoreEngineTombstone = true
     }
-
     apply(snapshot: imported.snapshot)
     try persist(imported.snapshot)
 
@@ -1256,6 +1925,12 @@ final class QixiViewModel: ObservableObject {
   }
 
   func installNativeModel(from url: URL) async throws -> NativeKataGoInstalledModel {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "model installation", backendMessage: "another backend transition is active")
+    }
+    let transitionToken = beginBackendTransition(.installingModel)
+    defer { finishBackendTransition(transitionToken) }
+    await Task.yield()
     var replacingSelectedEngine: AnalysisEngine?
     var didUnloadSelectedEngine = false
     do {
@@ -1286,6 +1961,12 @@ final class QixiViewModel: ObservableObject {
   }
 
   func installNativeCoreMLPackage(from url: URL) async throws -> NativeKataGoInstalledCoreMLPackage {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "Core ML package installation", backendMessage: "another backend transition is active")
+    }
+    let transitionToken = beginBackendTransition(.installingModel)
+    defer { finishBackendTransition(transitionToken) }
+    await Task.yield()
     var replacingSelectedEngine: AnalysisEngine?
     var didUnloadSelectedEngine = false
     do {
@@ -1321,7 +2002,12 @@ final class QixiViewModel: ObservableObject {
     clearVisibleAnalysisAndRefreshAnchor()
     hermesStatus = .loading
     saveNow(reason: "beforeModelInstall")
-    _ = try await analysisService.setEngine(.none)
+    if coreBackendService != nil {
+      try await submitCoreEngineSelectionAndWait(.none, reason: "coreModelInstallUnload")
+    } else {
+      await waitForCoreMutationDrain()
+      _ = try await analysisService.setEngine(.none)
+    }
   }
 
   private func recoverAfterModelInstallFailure(
@@ -1332,7 +2018,12 @@ final class QixiViewModel: ObservableObject {
     selectedEngine = engine
     saveNow(reason: "modelInstallFailed")
     if didUnloadSelectedEngine {
-      startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)
+      let transitionToken = beginBackendTransition(.switchingEngine)
+      startAnalysis(
+        engine: engine,
+        assumesEngineAlreadyLoaded: false,
+        transitionToken: transitionToken
+      )
     } else {
       hermesStatus = .offline
     }
@@ -1341,25 +2032,42 @@ final class QixiViewModel: ObservableObject {
   private func reloadInstalledModelIfNeeded(engine: AnalysisEngine, wasReplacingSelectedEngine: Bool) {
     if wasReplacingSelectedEngine && selectedEngine == .none {
       selectedEngine = engine
-      startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)
+      let transitionToken = beginBackendTransition(.switchingEngine)
+      startAnalysis(
+        engine: engine,
+        assumesEngineAlreadyLoaded: false,
+        transitionToken: transitionToken
+      )
     } else if selectedEngine == engine {
-      startAnalysis(engine: engine, assumesEngineAlreadyLoaded: false)
+      let transitionToken = beginBackendTransition(.switchingEngine)
+      startAnalysis(
+        engine: engine,
+        assumesEngineAlreadyLoaded: false,
+        transitionToken: transitionToken
+      )
     }
   }
 
   func recognizeBoardImage(data: Data) throws -> QixiBoardRecognitionResult {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "board recognition", backendMessage: "another backend transition is active")
+    }
     let result = try QixiBoardImageRecognizer.recognizeBoard(from: data)
     applyBoardRecognition(result)
     return result
   }
 
   func recognizeBoardImage(url: URL) throws -> QixiBoardRecognitionResult {
+    guard !isBackendInteractionBlocked else {
+      throw QixiCoreBarrierError(operation: "board recognition", backendMessage: "another backend transition is active")
+    }
     let result = try QixiBoardImageRecognizer.recognizeBoard(from: url)
     applyBoardRecognition(result)
     return result
   }
 
   func applyBoardRecognition(_ result: QixiBoardRecognitionResult) {
+    guard !isBackendInteractionBlocked else { return }
     let stones = Self.normalizedRecognizedStones(result.stones)
     let appliedResult = QixiBoardRecognitionResult(stones: stones, gridX: result.gridX, gridY: result.gridY)
     let setupStones = Self.setupStones(from: stones)
@@ -1372,6 +2080,18 @@ final class QixiViewModel: ObservableObject {
     updateBoardMoveCache()
     clearVisibleAnalysisAndRefreshAnchor()
     saveSoon(reason: "boardRecognitionApplied")
+    if coreBackendService != nil {
+      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      submitCoreMutation(
+        .applyRecognizedBoard(
+          setupStones: setupStones,
+          nextPla: .black,
+          expectedBackendEpoch: 0
+        ),
+        reason: "coreBoardRecognitionApplied"
+      )
+      return
+    }
     requestAnalysisIfNeeded()
   }
 
@@ -1514,6 +2234,154 @@ final class QixiViewModel: ObservableObject {
     return true
   }
 
+  private func applyCoreBackendResult(
+    _ result: QixiCoreBackendResult,
+    reason: String,
+    allowWhileMutationsPending: Bool
+  ) {
+    if result.backendEpoch < coreBackendEpoch ||
+       (result.backendEpoch == coreBackendEpoch && result.revision < coreRevision) {
+      return
+    }
+    let deferSnapshot = !allowWhileMutationsPending && corePendingMutationCount > 0
+    coreBackendEpoch = result.backendEpoch
+    coreRevision = result.revision
+    coreCurrentRootID = result.currentRoot
+    if result.ok {
+      lastEngineError = nil
+      hermesStatus = selectedEngine == .none || result.engineState == "ready" ? .ready : .loading
+    } else {
+      lastEngineError = result.message
+      hermesStatus = result.engineState == "loading" ? .loading : .offline
+      recordRuntimeDiagnostic(event: "coreBackendRequestFailed", success: false, message: result.message)
+      return
+    }
+    if deferSnapshot { return }
+    guard let snapshot = result.snapshot else { return }
+    applyCoreSnapshot(snapshot, reason: reason)
+  }
+
+  private func applyCoreSnapshot(_ snapshot: QixiCoreSnapshot, reason: String) {
+    coreCurrentRootID = snapshot.root
+    currentWinrate = snapshot.rootVisits > 0 ? snapshot.rootWinrate : 0.5
+    currentScoreMean = snapshot.rootVisits > 0 ? snapshot.rootScoreMean : 0.0
+    candidates = snapshot.candidates.enumerated().compactMap { offset, candidate in
+      guard !candidate.pass,
+            candidate.x >= 0, candidate.x < 19,
+            candidate.y >= 0, candidate.y < 19 else {
+        return nil
+      }
+      return CandidateMove(
+        x: candidate.x,
+        y: candidate.y,
+        rank: offset + 1,
+        winrate: candidate.winrate,
+        visits: Int(clamping: candidate.visits),
+        scoreMean: candidate.scoreMean
+      )
+    }
+    if snapshot.hasOwnership {
+      territory = snapshot.ownership.enumerated().compactMap { index, value in
+        guard abs(value) >= 0.16 else { return nil }
+        return TerritoryPoint(x: index % 19, y: index / 19, ownership: value)
+      }
+    }
+    rebuildVariationTree(from: snapshot)
+    if selectedEngine != .none, let cacheKey = currentAnalysisCacheKey(for: selectedEngine) {
+      cacheCurrentAnalysis(
+        engine: selectedEngine,
+        cacheKey: cacheKey,
+        positionKey: "core:\(snapshot.root)",
+        visits: Int(clamping: snapshot.rootVisits)
+      )
+    }
+    if reason != "snapshotPoll" || snapshot.rootVisits.isMultiple(of: 64) {
+      recordRuntimeDiagnostic(
+        event: "coreSnapshotApplied",
+        success: true,
+        message: "root=\(snapshot.root) visits=\(snapshot.rootVisits) candidates=\(snapshot.candidates.count)"
+      )
+    }
+  }
+
+  private func rebuildVariationTree(from snapshot: QixiCoreSnapshot) {
+    guard !snapshot.visibleTree.isEmpty else { return }
+    var records: [String: QixiVariationNodeRecord] = [:]
+    var childIDsByParent: [String: [String]] = [:]
+    var laneByNode: [UInt32: Int] = [:]
+    let orderedNodes = snapshot.visibleTree.sorted {
+      if $0.ply != $1.ply { return $0.ply < $1.ply }
+      return $0.id < $1.id
+    }
+    let variationIDByCoreNodeID = Dictionary(
+      uniqueKeysWithValues: orderedNodes.map { ($0.id, coreVariationNodeID($0.lineageHash)) }
+    )
+    for node in orderedNodes {
+      let nodeID = coreVariationNodeID(node.lineageHash)
+      let parentID = node.parent.flatMap { variationIDByCoreNodeID[$0] }
+      let siblingIndex = parentID.flatMap { childIDsByParent[$0]?.count } ?? 0
+      let parentLane = node.parent.flatMap { laneByNode[$0] } ?? 0
+      let lane = node.parent == nil
+        ? 0
+        : (siblingIndex == 0 ? parentLane : parentLane + (siblingIndex.isMultiple(of: 2) ? -siblingIndex : siblingIndex))
+      let move = boardMove(fromCoreMove: node.moveFromParent, color: node.moveColor)
+      records[nodeID] = QixiVariationNodeRecord(
+        id: nodeID,
+        parentID: parentID,
+        move: move,
+        ply: Int(node.ply),
+        lane: lane,
+        isInitial: node.parent == nil
+      )
+      if childIDsByParent[nodeID] == nil {
+        childIDsByParent[nodeID] = []
+      }
+      if let parentID {
+        childIDsByParent[parentID, default: []].append(nodeID)
+      }
+      laneByNode[node.id] = lane
+    }
+    let currentNodeID = coreVariationNodeID(snapshot.rootLineageHash)
+    guard records[currentNodeID] != nil else { return }
+    variationRecords = records
+    variationChildIDsByParent = childIDsByParent
+    coreRootReferenceByVariationNodeID = Dictionary(
+      uniqueKeysWithValues: orderedNodes.map {
+        (coreVariationNodeID($0.lineageHash), .lineage($0.lineageHash))
+      }
+    )
+    coreQualityDeltaByVariationNodeID = Dictionary(
+      uniqueKeysWithValues: orderedNodes.compactMap { node in
+        node.qualityDeltaPercent.map { (coreVariationNodeID(node.lineageHash), $0) }
+      }
+    )
+    currentVariationNodeID = currentNodeID
+    currentVariationPathNodeIDs = variationPathNodeIDs(to: currentVariationNodeID)
+    mainLine = currentVariationPathNodeIDs.compactMap { variationRecords[$0]?.move }
+    currentPly = min(variationRecords[currentVariationNodeID]?.ply ?? 0, mainLine.count)
+    nextVariationNodeSequence = max(nextVariationNodeSequence, records.count + 1)
+  }
+
+  private func coreVariationNodeID(_ lineageHash: UInt64) -> String {
+    "l\(lineageHash)"
+  }
+
+  private func boardMove(fromCoreMove move: Int, color: String) -> BoardMove? {
+    let stoneColor: StoneColor
+    if color == "black" {
+      stoneColor = .black
+    } else if color == "white" {
+      stoneColor = .white
+    } else {
+      return nil
+    }
+    if move == 361 {
+      return BoardMove(pass: stoneColor)
+    }
+    guard move >= 0, move < 361 else { return nil }
+    return BoardMove(color: stoneColor, x: move % 19, y: move / 19)
+  }
+
   private func analysisRegressionReason(
     _ response: AnalysisResponse,
     engine: AnalysisEngine,
@@ -1595,6 +2463,15 @@ final class QixiViewModel: ObservableObject {
     y * 19 + x
   }
 
+  private func nextCoreIntentID() -> UInt64 {
+    defer { coreNextIntentID += 1 }
+    return coreNextIntentID
+  }
+
+  private func coreMoveIndex(x: Int, y: Int) -> Int {
+    y * 19 + x
+  }
+
   private func refreshLocalChartAnchor() {
     currentWinrate = 0.5
     currentScoreMean = 0.0
@@ -1610,23 +2487,105 @@ final class QixiViewModel: ObservableObject {
     refreshLocalChartAnchor()
   }
 
-  private func resumeAnalysisAfterLaunch() async {
-    let restoredEngineTombstone = await restoreEngineTombstoneIfAvailable()
+  private func resumeAnalysisAfterLaunch(transitionToken: UInt64) async {
+    var transitionHandedToEngineLoad = false
+    var coreBootSucceeded = false
+    defer {
+      if !transitionHandedToEngineLoad {
+        finishBackendTransition(transitionToken)
+      }
+    }
+    if let coreBackendService {
+      do {
+        let boot = try await coreBackendService.submitCoreRequest(
+          .boot(loadLastState: true, firstLaunch: false, expectedBackendEpoch: 0)
+        )
+        coreBackendEpoch = boot.backendEpoch
+        coreRevision = boot.revision
+        coreCurrentRootID = boot.currentRoot
+        coreBootSucceeded = true
+        if let snapshot = boot.snapshot, snapshot.visibleTree.count > 1 || mainLine.isEmpty {
+          applyCoreBackendResult(boot, reason: "coreBoot", allowWhileMutationsPending: true)
+        } else if !mainLine.isEmpty {
+          enqueueCurrentMainLineIntoCore(reason: "coreLaunchRecordRestore")
+        }
+      } catch {
+        lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
+        hermesStatus = .offline
+      }
+      await waitForCoreMutationDrain()
+      if coreBootSucceeded {
+        do {
+          try await submitCoreMutationAndWait(
+            .setKomi(komi, expectedBackendEpoch: 0),
+            reason: "coreLaunchKomiRestore"
+          )
+          try await submitCoreMutationAndWait(
+            .setWideRootNoise(rootNoise, expectedBackendEpoch: 0),
+            reason: "coreLaunchRootNoiseReset"
+          )
+        } catch {
+          lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
+          hermesStatus = .offline
+        }
+      }
+    }
+    let restoredEngineTombstone = coreBackendService == nil
+      ? await restoreEngineTombstoneIfAvailable()
+      : false
     exportAutomationRealDeviceEvidenceIfRequested(
       environment: ProcessInfo.processInfo.environment,
       trigger: .launch
     )
     if selectedEngine != .none {
+      transitionHandedToEngineLoad = true
       if restoredEngineTombstone {
         startAnalysis(
           engine: selectedEngine,
-          assumesEngineAlreadyLoaded: true
+          assumesEngineAlreadyLoaded: true,
+          transitionToken: transitionToken
         )
       } else {
-        requestAnalysisIfNeeded(
-          assumesEngineAlreadyLoaded: false
+        startAnalysis(
+          engine: selectedEngine,
+          assumesEngineAlreadyLoaded: false,
+          transitionToken: transitionToken
         )
       }
+    }
+  }
+
+  private func enqueueCurrentMainLineIntoCore(reason: String) {
+    coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+    submitCoreMutation(
+      .newGame(
+        komi: komi,
+        nextPla: mainLine.first?.color ?? .black,
+        expectedBackendEpoch: 0
+      ),
+      reason: "\(reason)Reset"
+    )
+    var parent: QixiCoreRootReference = .node(0)
+    for (index, move) in mainLine.enumerated() {
+      guard index + 1 < currentVariationPathNodeIDs.count else { break }
+      let intentID = nextCoreIntentID()
+      let nodeID = currentVariationPathNodeIDs[index + 1]
+      coreRootReferenceByVariationNodeID[nodeID] = .intent(intentID)
+      let coreMove = move.isPass
+        ? 361
+        : coreMoveIndex(x: move.x ?? -1, y: move.y ?? -1)
+      submitCoreMutation(
+        .playMove(
+          move: coreMove,
+          uiIntentId: intentID,
+          parentRoot: parent,
+          expectedBackendEpoch: 0
+        ),
+        reason: "\(reason)Move",
+        optimisticVariationNodeID: nodeID,
+        uiIntentID: intentID
+      )
+      parent = .intent(intentID)
     }
   }
 
@@ -1636,7 +2595,10 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func engineTombstoneFilenameIfSupported() -> String? {
-    (analysisService as? any QixiEngineTombstoneService) == nil ? nil : QixiEngineTombstoneStore.tombstoneFilename
+    if coreBackendService != nil { return nil }
+    return (analysisService as? any QixiEngineTombstoneService) == nil
+      ? nil
+      : QixiEngineTombstoneStore.tombstoneFilename
   }
 
   private func exportEngineTombstoneIfSupported(reason: String) {
@@ -1973,7 +2935,14 @@ final class QixiViewModel: ObservableObject {
     autosaveTimer?.invalidate()
     autosaveTimer = Timer.scheduledTimer(withTimeInterval: Self.autosaveInterval, repeats: true) { [weak self] _ in
       Task { @MainActor in
-        self?.saveNow(reason: "periodicAutosave")
+        guard let self else { return }
+        self.saveNow(reason: "periodicAutosave")
+        if self.coreBackendService != nil {
+          self.submitCoreMutation(
+            .autosaveTick(reason: "periodicAutosave", expectedBackendEpoch: 0),
+            reason: "corePeriodicAutosave"
+          )
+        }
       }
     }
   }
@@ -1988,6 +2957,18 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func scheduleAnalysisRefresh(reason: String) {
+    if coreBackendService != nil {
+      analysisRefreshTask?.cancel()
+      switch reason {
+      case "komiChanged":
+        submitCoreMutation(.setKomi(komi, expectedBackendEpoch: 0), reason: "coreKomiChanged")
+      case "rootNoiseChanged":
+        submitCoreMutation(.setWideRootNoise(rootNoise, expectedBackendEpoch: 0), reason: "coreRootNoiseChanged")
+      default:
+        submitCoreMutation(.autosaveTick(reason: reason, expectedBackendEpoch: 0), reason: "coreRefresh")
+      }
+      return
+    }
     guard selectedEngine != .none else { return }
     let engine = selectedEngine
     analysisRefreshTask?.cancel()
@@ -2035,6 +3016,10 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func invalidateActiveAnalysisForPositionChange() {
+    if coreBackendService != nil {
+      analysisRefreshTask?.cancel()
+      return
+    }
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
     analysisGeneration += 1
