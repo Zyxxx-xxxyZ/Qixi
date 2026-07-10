@@ -10,6 +10,7 @@ add_library(qixi_core
   src/board.cpp
   src/mcts.cpp
   src/request_pool.cpp
+  src/oracle_compare.cpp
 )
 
 target_include_directories(qixi_core PUBLIC include)
@@ -32,7 +33,14 @@ add_executable(qixi_core_store_bundle
 
 target_link_libraries(qixi_core_store_bundle PRIVATE qixi_core)
 
+add_executable(qixi_oracle_scaffold
+  tests/qixi_oracle_scaffold.cpp
+)
+
+target_link_libraries(qixi_oracle_scaffold PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
 add_test(NAME qixi_core_store_bundle COMMAND qixi_core_store_bundle)
+add_test(NAME qixi_oracle_scaffold COMMAND qixi_oracle_scaffold)

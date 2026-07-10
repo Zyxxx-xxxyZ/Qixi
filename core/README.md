@@ -51,6 +51,10 @@ Correctness scope:
   heuristic, RNG draw, score-utility update, or ruleset encore/dead-stone behavior.
 - Store serialization currently builds a complete byte vector before atomic file write.
   It avoids duplicate trees and transient store cloning, but is not a streaming encoder.
+- `qixi_oracle_scaffold` locks custom-core deterministic baselines and the
+  `OracleRootReport` comparison shape (`oracle_compare.hpp`) for the first fixed-root
+  case. It does **not** link official KataGo Search yet; official equivalence remains
+  unproven until a shared-model harness fills `OfficialKataGoOracle`.
 
 Build:
 
