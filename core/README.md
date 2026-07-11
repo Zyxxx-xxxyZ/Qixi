@@ -53,8 +53,11 @@ Correctness scope:
   It avoids duplicate trees and transient store cloning, but is not a streaming encoder.
 - `qixi_oracle_scaffold` locks custom-core deterministic baselines and the
   `OracleRootReport` comparison shape (`oracle_compare.hpp`) for the first fixed-root
-  case. It does **not** link official KataGo Search yet; official equivalence remains
-  unproven until a shared-model harness fills `OfficialKataGoOracle`.
+  case under a UniformEvaluator.
+- Dual backend analysis API: `include/qixi/analysis_api.hpp` (root change, analysis
+  budget, root analysis count, winrate/score). Custom implementation in
+  `src/analysis_api_custom.cpp`. Official host wrapper + full 8-game SGF harness:
+  `core/oracle/` (see `core/oracle/README.md`).
 
 Build:
 

@@ -11,6 +11,7 @@ add_library(qixi_core
   src/mcts.cpp
   src/request_pool.cpp
   src/oracle_compare.cpp
+  src/analysis_api_custom.cpp
 )
 
 target_include_directories(qixi_core PUBLIC include)
@@ -39,8 +40,15 @@ add_executable(qixi_oracle_scaffold
 
 target_link_libraries(qixi_oracle_scaffold PRIVATE qixi_core)
 
+add_executable(qixi_analysis_api_smoke
+  tests/qixi_analysis_api_smoke.cpp
+)
+
+target_link_libraries(qixi_analysis_api_smoke PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
 add_test(NAME qixi_core_store_bundle COMMAND qixi_core_store_bundle)
 add_test(NAME qixi_oracle_scaffold COMMAND qixi_oracle_scaffold)
+add_test(NAME qixi_analysis_api_smoke COMMAND qixi_analysis_api_smoke)

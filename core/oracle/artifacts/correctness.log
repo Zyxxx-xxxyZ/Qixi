@@ -1,0 +1,290 @@
+qixi_oracle_correctness starting
+model=/private/tmp/qixi_models/b6.bin
+sgfs=/Users/zyx/Desktop/projects/Qixi/sgfs
+seed=5857309862258688844
+NN evaluator ready (Eigen backend, 1 thread)
+eligible sgfs: 882
+game rating-games_DA93281067B79D2E4041815ED452BA28.sgf moves=202 windowStart=52 window=[52,71]
+  rootSequence(rel): 16 15 13 16 17 15 16 13 14 13 16 13 16 15 12 15 13 15 16 15 17 20 17 16 17 16 14 16 17 20 19 18
+  step  0 ply=67 customVisits=128 (+128) wr=0.7230 pts=8.8070 best=D16 | officialVisits=128 (+128) wr=0.5688 pts=2.4618 best=D16 matchVisits=yes dWR=-0.1542 dPts=-6.3452
+  step  1 ply=66 customVisits=128 (+128) wr=0.3038 pts=-7.2456 best=S5 | officialVisits=128 (+128) wr=0.4242 pts=-3.0178 best=S5 matchVisits=yes dWR=0.1204 dPts=4.2278
+  step  2 ply=64 customVisits=128 (+128) wr=0.3681 pts=-5.0496 best=S5 | officialVisits=128 (+128) wr=0.4540 pts=-1.9315 best=S5 matchVisits=yes dWR=0.0858 dPts=3.1180
+  step  3 ply=67 customVisits=257 (+128) wr=0.7612 pts=10.9244 best=D16 | officialVisits=257 (+257) wr=0.5729 pts=2.6895 best=D16 matchVisits=yes dWR=-0.1884 dPts=-8.2350
+  step  4 ply=68 customVisits=129 (+128) wr=0.3281 pts=-6.6701 best=S5 | officialVisits=129 (+129) wr=0.4232 pts=-3.0777 best=S5 matchVisits=yes dWR=0.0951 dPts=3.5925
+  step  5 ply=66 customVisits=256 (+128) wr=0.2619 pts=-9.2329 best=S5 | officialVisits=256 (+256) wr=0.4291 pts=-2.8090 best=S5 matchVisits=yes dWR=0.1673 dPts=6.4240
+  step  6 ply=67 customVisits=385 (+128) wr=0.7951 pts=13.9148 best=D16 | officialVisits=385 (+385) wr=0.5724 pts=2.7164 best=M17 matchVisits=yes dWR=-0.2227 dPts=-11.1984
+  step  7 ply=64 customVisits=256 (+128) wr=0.3430 pts=-6.0329 best=S5 | officialVisits=256 (+256) wr=0.4518 pts=-1.9717 best=S5 matchVisits=yes dWR=0.1088 dPts=4.0612
+  step  8 ply=65 customVisits=129 (+128) wr=0.7443 pts=11.2632 best=A11 | officialVisits=129 (+129) wr=0.5838 pts=3.1442 best=A11 matchVisits=yes dWR=-0.1605 dPts=-8.1190
+  step  9 ply=64 customVisits=384 (+128) wr=0.3005 pts=-8.4609 best=S5 | officialVisits=384 (+384) wr=0.4510 pts=-2.0177 best=S5 matchVisits=yes dWR=0.1505 dPts=6.4431
+  step 10 ply=67 customVisits=513 (+128) wr=0.7611 pts=11.9197 best=D16 | officialVisits=513 (+513) wr=0.5727 pts=2.7582 best=M17 matchVisits=yes dWR=-0.1884 dPts=-9.1615
+  step 11 ply=64 customVisits=512 (+128) wr=0.3254 pts=-7.5064 best=S5 | officialVisits=512 (+512) wr=0.4566 pts=-1.7806 best=S5 matchVisits=yes dWR=0.1312 dPts=5.7258
+  step 12 ply=67 customVisits=641 (+128) wr=0.7472 pts=10.9878 best=D16 | officialVisits=641 (+641) wr=0.5732 pts=2.7895 best=M17 matchVisits=yes dWR=-0.1740 dPts=-8.1983
+  step 13 ply=66 customVisits=501 (+128) wr=0.2945 pts=-8.4160 best=S5 | officialVisits=501 (+501) wr=0.4279 pts=-2.7717 best=S5 matchVisits=yes dWR=0.1334 dPts=5.6443
+  step 14 ply=63 customVisits=128 (+128) wr=0.6863 pts=7.0192 best=A11 | officialVisits=128 (+128) wr=0.5809 pts=3.1560 best=A11 matchVisits=yes dWR=-0.1054 dPts=-3.8632
+  step 15 ply=66 customVisits=629 (+128) wr=0.3068 pts=-7.7798 best=S5 | officialVisits=629 (+629) wr=0.4328 pts=-2.5955 best=S5 matchVisits=yes dWR=0.1260 dPts=5.1843
+  step 16 ply=64 customVisits=646 (+128) wr=0.3466 pts=-6.5563 best=S5 | officialVisits=646 (+646) wr=0.4532 pts=-1.9286 best=S5 matchVisits=yes dWR=0.1067 dPts=4.6276
+  step 17 ply=66 customVisits=757 (+128) wr=0.3194 pts=-7.2093 best=S5 | officialVisits=757 (+757) wr=0.4394 pts=-2.3182 best=S5 matchVisits=yes dWR=0.1200 dPts=4.8911
+  step 18 ply=67 customVisits=770 (+128) wr=0.7441 pts=10.6275 best=D16 | officialVisits=770 (+770) wr=0.5742 pts=2.8430 best=J17 matchVisits=yes dWR=-0.1699 dPts=-7.7845
+  step 19 ply=66 customVisits=885 (+128) wr=0.3388 pts=-6.4128 best=S5 | officialVisits=885 (+885) wr=0.4415 pts=-2.2219 best=S5 matchVisits=yes dWR=0.1027 dPts=4.1909
+  step 20 ply=68 customVisits=267 (+128) wr=0.2869 pts=-8.4531 best=S5 | officialVisits=267 (+267) wr=0.4288 pts=-2.8312 best=S5 matchVisits=yes dWR=0.1419 dPts=5.6219
+  step 21 ply=71 customVisits=133 (+128) wr=0.5534 pts=2.2757 best=G17 | officialVisits=133 (+133) wr=0.5382 pts=1.6357 best=G17 matchVisits=yes dWR=-0.0151 dPts=-0.6401
+  step 22 ply=68 customVisits=395 (+128) wr=0.2730 pts=-9.5191 best=S5 | officialVisits=395 (+395) wr=0.4391 pts=-2.4605 best=S2 matchVisits=yes dWR=0.1660 dPts=7.0586
+  step 23 ply=67 customVisits=898 (+128) wr=0.7428 pts=10.4664 best=D16 | officialVisits=898 (+898) wr=0.5716 pts=2.7342 best=D16 matchVisits=yes dWR=-0.1712 dPts=-7.7321
+  step 24 ply=68 customVisits=524 (+128) wr=0.3046 pts=-8.1434 best=S5 | officialVisits=524 (+524) wr=0.4364 pts=-2.5513 best=S5 matchVisits=yes dWR=0.1318 dPts=5.5922
+  step 25 ply=67 customVisits=1026 (+128) wr=0.7408 pts=10.3031 best=D16 | officialVisits=1026 (+1026) wr=0.5730 pts=2.7843 best=D16 matchVisits=yes dWR=-0.1678 dPts=-7.5189
+  step 26 ply=65 customVisits=257 (+128) wr=0.6961 pts=8.3759 best=A11 | officialVisits=257 (+257) wr=0.5731 pts=2.7618 best=A11 matchVisits=yes dWR=-0.1230 dPts=-5.6142
+  step 27 ply=67 customVisits=1154 (+128) wr=0.7410 pts=10.2622 best=D16 | officialVisits=1154 (+1154) wr=0.5708 pts=2.7119 best=D16 matchVisits=yes dWR=-0.1702 dPts=-7.5503
+  step 28 ply=68 customVisits=652 (+128) wr=0.3187 pts=-7.5090 best=S5 | officialVisits=652 (+652) wr=0.4455 pts=-2.1532 best=S2 matchVisits=yes dWR=0.1267 dPts=5.3558
+  step 29 ply=71 customVisits=266 (+128) wr=0.5594 pts=2.5485 best=G17 | officialVisits=266 (+266) wr=0.5315 pts=1.3575 best=G17 matchVisits=yes dWR=-0.0279 dPts=-1.1910
+  step 30 ply=70 customVisits=141 (+128) wr=0.3595 pts=-5.5292 best=Q2 | officialVisits=141 (+141) wr=0.4422 pts=-2.3340 best=Q2 matchVisits=yes dWR=0.0827 dPts=3.1952
+  step 31 ply=69 customVisits=166 (+128) wr=0.6852 pts=7.3020 best=S5 | officialVisits=166 (+166) wr=0.5532 pts=2.1597 best=S5 matchVisits=yes dWR=-0.1320 dPts=-5.1423
+GAME OK rating-games_DA93281067B79D2E4041815ED452BA28.sgf steps=32
+game training-games_F3ECC1869E66B82B6F89402937291CDF.sgf moves=329 windowStart=209 window=[209,228]
+  rootSequence(rel): 18 20 19 20 17 15 14 13 10 11 14 15 14 15 17 19 17 18 19 20 19 20 19 20 19 17 14 16 13 10 9 11
+  step  0 ply=226 customVisits=128 (+128) wr=0.7414 pts=3.6824 best=B2 | officialVisits=128 (+128) wr=0.5017 pts=-4.5596 best=B2 matchVisits=yes dWR=-0.2397 dPts=-8.2421
+  step  1 ply=228 customVisits=162 (+128) wr=0.8732 pts=9.8919 best=O6 | officialVisits=162 (+162) wr=0.4915 pts=-4.9207 best=O6 matchVisits=yes dWR=-0.3817 dPts=-14.8126
+  step  2 ply=227 customVisits=209 (+93) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4731 pts=4.4195 best=Q10 matchVisits=yes dWR=0.3456 dPts=12.4193
+  step  3 ply=228 customVisits=201 (+38) wr=0.8899 pts=10.6826 best=O6 | officialVisits=201 (+201) wr=0.4936 pts=-4.7587 best=O6 matchVisits=yes dWR=-0.3963 dPts=-15.4413
+  step  4 ply=225 customVisits=2 (+2) wr=0.1793 pts=-6.3622 best=A4 | officialVisits=2 (+2) wr=0.1729 pts=-6.2827 best=A4 matchVisits=yes dWR=-0.0065 dPts=0.0795
+  step  5 ply=223 customVisits=2 (+2) wr=0.2949 pts=-3.6573 best=N9 | officialVisits=2 (+2) wr=0.2469 pts=-4.6339 best=N9 matchVisits=yes dWR=-0.0480 dPts=-0.9767
+  step  6 ply=222 customVisits=1 (+1) wr=0.3842 pts=-4.4649 best=O8 | officialVisits=1 (+1) wr=0.8620 pts=9.5253 best=pass matchVisits=yes dWR=0.4779 dPts=13.9903
+  step  7 ply=221 customVisits=2 (+2) wr=0.1763 pts=-6.2284 best=A4 | officialVisits=2 (+2) wr=0.4409 pts=0.8871 best=Q10 matchVisits=yes dWR=0.2645 dPts=7.1155
+  step  8 ply=218 customVisits=128 (+128) wr=0.9122 pts=11.2619 best=R10 | officialVisits=128 (+128) wr=0.5479 pts=-3.1056 best=R10 matchVisits=yes dWR=-0.3643 dPts=-14.3675
+  step  9 ply=219 customVisits=170 (+54) wr=0.0580 pts=-12.1531 best=J1 | officialVisits=170 (+170) wr=0.3653 pts=-1.0151 best=J1 matchVisits=yes dWR=0.3073 dPts=11.1380
+  step 10 ply=222 customVisits=1 (+0) wr=0.3842 pts=-4.4649 best=O8 | officialVisits=1 (+1) wr=0.8620 pts=9.5253 best=pass matchVisits=yes dWR=0.4779 dPts=13.9903
+  step 11 ply=223 customVisits=2 (+0) wr=0.2949 pts=-3.6573 best=N9 | officialVisits=2 (+2) wr=0.2469 pts=-4.6339 best=N9 matchVisits=yes dWR=-0.0480 dPts=-0.9767
+  step 12 ply=222 customVisits=1 (+0) wr=0.3842 pts=-4.4649 best=O8 | officialVisits=1 (+1) wr=0.8620 pts=9.5253 best=pass matchVisits=yes dWR=0.4779 dPts=13.9903
+  step 13 ply=223 customVisits=2 (+0) wr=0.2949 pts=-3.6573 best=N9 | officialVisits=2 (+2) wr=0.2469 pts=-4.6339 best=N9 matchVisits=yes dWR=-0.0480 dPts=-0.9767
+  step 14 ply=225 customVisits=2 (+0) wr=0.1793 pts=-6.3622 best=A4 | officialVisits=2 (+2) wr=0.1729 pts=-6.2827 best=A4 matchVisits=yes dWR=-0.0065 dPts=0.0795
+  step 15 ply=227 customVisits=209 (+0) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4855 pts=5.0764 best=Q10 matchVisits=yes dWR=0.3580 dPts=13.0761
+  step 16 ply=225 customVisits=2 (+0) wr=0.1793 pts=-6.3622 best=A4 | officialVisits=2 (+2) wr=0.1729 pts=-6.2827 best=A4 matchVisits=yes dWR=-0.0065 dPts=0.0795
+  step 17 ply=226 customVisits=128 (+0) wr=0.7414 pts=3.6824 best=B2 | officialVisits=128 (+128) wr=0.5405 pts=-2.9222 best=B2 matchVisits=yes dWR=-0.2009 dPts=-6.6046
+  step 18 ply=227 customVisits=209 (+0) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4855 pts=5.0764 best=Q10 matchVisits=yes dWR=0.3580 dPts=13.0761
+  step 19 ply=228 customVisits=201 (+0) wr=0.8899 pts=10.6826 best=O6 | officialVisits=201 (+201) wr=0.4403 pts=-9.1004 best=N7 matchVisits=yes dWR=-0.4495 dPts=-19.7830
+  step 20 ply=227 customVisits=209 (+0) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4855 pts=5.0764 best=Q10 matchVisits=yes dWR=0.3580 dPts=13.0761
+  step 21 ply=228 customVisits=201 (+0) wr=0.8899 pts=10.6826 best=O6 | officialVisits=201 (+201) wr=0.4403 pts=-9.1004 best=N7 matchVisits=yes dWR=-0.4495 dPts=-19.7830
+  step 22 ply=227 customVisits=209 (+0) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4855 pts=5.0764 best=Q10 matchVisits=yes dWR=0.3580 dPts=13.0761
+  step 23 ply=228 customVisits=201 (+0) wr=0.8899 pts=10.6826 best=O6 | officialVisits=201 (+201) wr=0.4403 pts=-9.1004 best=N7 matchVisits=yes dWR=-0.4495 dPts=-19.7830
+  step 24 ply=227 customVisits=209 (+0) wr=0.1275 pts=-7.9997 best=Q10 | officialVisits=209 (+209) wr=0.4855 pts=5.0764 best=Q10 matchVisits=yes dWR=0.3580 dPts=13.0761
+  step 25 ply=225 customVisits=2 (+0) wr=0.1793 pts=-6.3622 best=A4 | officialVisits=2 (+2) wr=0.1729 pts=-6.2827 best=A4 matchVisits=yes dWR=-0.0065 dPts=0.0795
+  step 26 ply=222 customVisits=1 (+0) wr=0.3842 pts=-4.4649 best=O8 | officialVisits=1 (+1) wr=0.8620 pts=9.5253 best=pass matchVisits=yes dWR=0.4779 dPts=13.9903
+  step 27 ply=224 customVisits=1 (+0) wr=0.7267 pts=4.7390 best=R10 | officialVisits=1 (+1) wr=0.9622 pts=13.3726 best=pass matchVisits=yes dWR=0.2355 dPts=8.6335
+  step 28 ply=221 customVisits=2 (+0) wr=0.1763 pts=-6.2284 best=A4 | officialVisits=2 (+2) wr=0.4409 pts=0.8871 best=Q10 matchVisits=yes dWR=0.2645 dPts=7.1155
+  step 29 ply=218 customVisits=128 (+0) wr=0.9122 pts=11.2619 best=R10 | officialVisits=128 (+128) wr=0.5557 pts=-2.8478 best=R10 matchVisits=yes dWR=-0.3565 dPts=-14.1096
+  step 30 ply=217 customVisits=1 (+1) wr=0.9434 pts=21.0532 best=B15 | officialVisits=1 (+1) wr=0.9730 pts=26.7538 best=pass matchVisits=yes dWR=0.0296 dPts=5.7007
+  step 31 ply=219 customVisits=170 (+0) wr=0.0580 pts=-12.1531 best=J1 | officialVisits=170 (+170) wr=0.3653 pts=-1.0151 best=J1 matchVisits=yes dWR=0.3073 dPts=11.1380
+GAME OK training-games_F3ECC1869E66B82B6F89402937291CDF.sgf steps=32
+game 41B78D2745F245324F19318C1823C716.sgf moves=372 windowStart=75 window=[75,94]
+  rootSequence(rel): 3 4 3 5 6 3 2 5 2 4 6 7 10 11 14 11 13 12 11 12 15 14 17 18 17 14 15 18 20 19 18 20
+  step  0 ply=77 customVisits=128 (+128) wr=0.4631 pts=-1.7648 best=P15 | officialVisits=128 (+128) wr=0.4802 pts=-0.9751 best=P15 matchVisits=yes dWR=0.0171 dPts=0.7898
+  step  1 ply=78 customVisits=131 (+128) wr=0.6494 pts=6.9324 best=P15 | officialVisits=131 (+131) wr=0.5878 pts=3.9960 best=P15 matchVisits=yes dWR=-0.0617 dPts=-2.9364
+  step  2 ply=77 customVisits=256 (+128) wr=0.4716 pts=-1.3772 best=P15 | officialVisits=256 (+256) wr=0.4800 pts=-1.0185 best=P15 matchVisits=yes dWR=0.0085 dPts=0.3587
+  step  3 ply=79 customVisits=130 (+128) wr=0.4637 pts=-1.7137 best=R16 | officialVisits=130 (+130) wr=0.4886 pts=-0.5933 best=R16 matchVisits=yes dWR=0.0248 dPts=1.1203
+  step  4 ply=80 customVisits=134 (+128) wr=0.6134 pts=5.2252 best=P15 | officialVisits=134 (+134) wr=0.5678 pts=3.0988 best=P15 matchVisits=yes dWR=-0.0457 dPts=-2.1264
+  step  5 ply=77 customVisits=384 (+128) wr=0.4771 pts=-1.1260 best=P15 | officialVisits=384 (+384) wr=0.4850 pts=-0.7431 best=P15 matchVisits=yes dWR=0.0079 dPts=0.3829
+  step  6 ply=76 customVisits=128 (+128) wr=0.4988 pts=0.0328 best=Q16 | officialVisits=128 (+128) wr=0.5134 pts=0.7040 best=Q16 matchVisits=yes dWR=0.0146 dPts=0.6713
+  step  7 ply=79 customVisits=258 (+128) wr=0.4760 pts=-1.1662 best=R16 | officialVisits=258 (+258) wr=0.4917 pts=-0.4246 best=R16 matchVisits=yes dWR=0.0157 dPts=0.7416
+  step  8 ply=76 customVisits=256 (+128) wr=0.5146 pts=0.7615 best=Q16 | officialVisits=256 (+256) wr=0.5088 pts=0.4788 best=Q16 matchVisits=yes dWR=-0.0058 dPts=-0.2827
+  step  9 ply=78 customVisits=260 (+128) wr=0.6909 pts=8.7880 best=P15 | officialVisits=260 (+260) wr=0.5835 pts=3.7653 best=P15 matchVisits=yes dWR=-0.1074 dPts=-5.0227
+  step 10 ply=80 customVisits=264 (+128) wr=0.6406 pts=6.2958 best=P15 | officialVisits=264 (+264) wr=0.5645 pts=2.9319 best=P15 matchVisits=yes dWR=-0.0761 dPts=-3.3640
+  step 11 ply=81 customVisits=368 (+128) wr=0.3151 pts=-8.1530 best=A15 | officialVisits=368 (+368) wr=0.4365 pts=-2.9641 best=A15 matchVisits=yes dWR=0.1214 dPts=5.1889
+  step 12 ply=84 customVisits=128 (+128) wr=0.6055 pts=4.6476 best=B14 | officialVisits=128 (+128) wr=0.5747 pts=3.2761 best=L3 matchVisits=yes dWR=-0.0308 dPts=-1.3714
+  step 13 ply=85 customVisits=131 (+128) wr=0.3981 pts=-4.6676 best=A15 | officialVisits=131 (+131) wr=0.4228 pts=-3.4060 best=A15 matchVisits=yes dWR=0.0247 dPts=1.2616
+  step 14 ply=88 customVisits=130 (+128) wr=0.6394 pts=6.4042 best=P3 | officialVisits=130 (+130) wr=0.6003 pts=4.5543 best=O5 matchVisits=yes dWR=-0.0391 dPts=-1.8499
+  step 15 ply=85 customVisits=259 (+128) wr=0.3713 pts=-5.8020 best=A15 | officialVisits=259 (+259) wr=0.4248 pts=-3.2771 best=A15 matchVisits=yes dWR=0.0535 dPts=2.5248
+  step 16 ply=87 customVisits=134 (+128) wr=0.3556 pts=-6.4409 best=L4 | officialVisits=134 (+134) wr=0.4097 pts=-3.9755 best=A15 matchVisits=yes dWR=0.0541 dPts=2.4655
+  step 17 ply=86 customVisits=139 (+128) wr=0.6920 pts=8.0265 best=K3 | officialVisits=139 (+139) wr=0.5807 pts=3.5800 best=K3 matchVisits=yes dWR=-0.1113 dPts=-4.4465
+  step 18 ply=85 customVisits=387 (+128) wr=0.3432 pts=-7.0051 best=A15 | officialVisits=387 (+387) wr=0.4276 pts=-3.2301 best=A15 matchVisits=yes dWR=0.0844 dPts=3.7750
+  step 19 ply=86 customVisits=268 (+128) wr=0.7132 pts=9.0512 best=K3 | officialVisits=268 (+268) wr=0.5799 pts=3.5254 best=K3 matchVisits=yes dWR=-0.1332 dPts=-5.5258
+  step 20 ply=89 customVisits=131 (+128) wr=0.3673 pts=-6.3576 best=P3 | officialVisits=131 (+131) wr=0.4036 pts=-4.4911 best=P3 matchVisits=yes dWR=0.0363 dPts=1.8665
+  step 21 ply=88 customVisits=289 (+128) wr=0.6860 pts=8.3690 best=P3 | officialVisits=289 (+289) wr=0.6025 pts=4.6527 best=O5 matchVisits=yes dWR=-0.0835 dPts=-3.7163
+  step 22 ply=91 customVisits=128 (+128) wr=0.3176 pts=-8.1837 best=K5 | officialVisits=128 (+128) wr=0.4005 pts=-4.4262 best=P3 matchVisits=yes dWR=0.0829 dPts=3.7575
+  step 23 ply=92 customVisits=130 (+128) wr=0.6285 pts=5.7627 best=O2 | officialVisits=130 (+130) wr=0.5961 pts=4.2153 best=L6 matchVisits=yes dWR=-0.0324 dPts=-1.5474
+  step 24 ply=91 customVisits=256 (+128) wr=0.2751 pts=-10.0052 best=K5 | officialVisits=256 (+256) wr=0.3941 pts=-4.6772 best=P3 matchVisits=yes dWR=0.1190 dPts=5.3280
+  step 25 ply=88 customVisits=417 (+128) wr=0.7020 pts=9.2335 best=P3 | officialVisits=417 (+417) wr=0.6035 pts=4.6764 best=O5 matchVisits=yes dWR=-0.0985 dPts=-4.5571
+  step 26 ply=89 customVisits=259 (+128) wr=0.3293 pts=-7.9682 best=P3 | officialVisits=259 (+259) wr=0.3981 pts=-4.6643 best=P3 matchVisits=yes dWR=0.0688 dPts=3.3039
+  step 27 ply=92 customVisits=260 (+128) wr=0.6494 pts=6.6537 best=O2 | officialVisits=260 (+260) wr=0.5896 pts=3.9296 best=O2 matchVisits=yes dWR=-0.0598 dPts=-2.7241
+  step 28 ply=94 customVisits=131 (+128) wr=0.6134 pts=5.2069 best=B14 | officialVisits=131 (+131) wr=0.5784 pts=3.5634 best=B14 matchVisits=yes dWR=-0.0350 dPts=-1.6435
+  step 29 ply=93 customVisits=254 (+128) wr=0.2894 pts=-9.2777 best=K5 | officialVisits=254 (+254) wr=0.4143 pts=-3.8395 best=K6 matchVisits=yes dWR=0.1249 dPts=5.4382
+  step 30 ply=92 customVisits=388 (+128) wr=0.6769 pts=7.9812 best=O2 | officialVisits=388 (+388) wr=0.5899 pts=3.9851 best=L6 matchVisits=yes dWR=-0.0870 dPts=-3.9961
+  step 31 ply=94 customVisits=263 (+128) wr=0.6626 pts=7.5207 best=B14 | officialVisits=263 (+263) wr=0.5815 pts=3.6326 best=L2 matchVisits=yes dWR=-0.0811 dPts=-3.8881
+GAME OK 41B78D2745F245324F19318C1823C716.sgf steps=32
+game rating-games_4B78878321F3BA72E8C70012700E0754.sgf moves=210 windowStart=65 window=[65,84]
+  rootSequence(rel): 14 11 14 11 8 7 9 8 7 9 6 4 1 0 1 2 3 4 7 10 11 9 6 5 4 7 6 3 2 0 1 2
+  step  0 ply=78 customVisits=128 (+128) wr=0.5574 pts=2.1096 best=M3 | officialVisits=128 (+128) wr=0.5538 pts=1.9388 best=L4 matchVisits=yes dWR=-0.0036 dPts=-0.1708
+  step  1 ply=75 customVisits=128 (+128) wr=0.3943 pts=-3.9830 best=O5 | officialVisits=128 (+128) wr=0.4317 pts=-2.4990 best=N3 matchVisits=yes dWR=0.0374 dPts=1.4839
+  step  2 ply=78 customVisits=261 (+128) wr=0.5661 pts=2.4554 best=M3 | officialVisits=261 (+261) wr=0.5553 pts=1.9224 best=F3 matchVisits=yes dWR=-0.0108 dPts=-0.5331
+  step  3 ply=75 customVisits=256 (+128) wr=0.3594 pts=-5.3120 best=O5 | officialVisits=256 (+256) wr=0.4335 pts=-2.4498 best=N3 matchVisits=yes dWR=0.0741 dPts=2.8623
+  step  4 ply=72 customVisits=128 (+128) wr=0.5633 pts=2.0916 best=F3 | officialVisits=128 (+128) wr=0.5557 pts=1.7503 best=F3 matchVisits=yes dWR=-0.0076 dPts=-0.3412
+  step  5 ply=71 customVisits=128 (+128) wr=0.4792 pts=-0.4352 best=F3 | officialVisits=128 (+128) wr=0.4852 pts=-0.2129 best=N13 matchVisits=yes dWR=0.0060 dPts=0.2223
+  step  6 ply=73 customVisits=141 (+128) wr=0.4377 pts=-2.3020 best=F3 | officialVisits=141 (+141) wr=0.4586 pts=-1.3961 best=N13 matchVisits=yes dWR=0.0209 dPts=0.9058
+  step  7 ply=72 customVisits=262 (+128) wr=0.5889 pts=2.9281 best=F3 | officialVisits=262 (+262) wr=0.5593 pts=1.9069 best=G3 matchVisits=yes dWR=-0.0296 dPts=-1.0212
+  step  8 ply=71 customVisits=256 (+128) wr=0.4805 pts=-0.3823 best=F3 | officialVisits=256 (+256) wr=0.4878 pts=-0.0988 best=F3 matchVisits=yes dWR=0.0074 dPts=0.2835
+  step  9 ply=73 customVisits=271 (+128) wr=0.4208 pts=-2.9771 best=F3 | officialVisits=271 (+271) wr=0.4580 pts=-1.4451 best=N13 matchVisits=yes dWR=0.0371 dPts=1.5320
+  step 10 ply=70 customVisits=128 (+128) wr=0.5173 pts=0.2755 best=B5 | officialVisits=128 (+128) wr=0.5014 pts=-0.2924 best=B5 matchVisits=yes dWR=-0.0159 dPts=-0.5679
+  step 11 ply=68 customVisits=128 (+128) wr=0.5195 pts=0.5172 best=F4 | officialVisits=128 (+128) wr=0.5224 pts=0.6660 best=N13 matchVisits=yes dWR=0.0029 dPts=0.1488
+  step 12 ply=65 customVisits=128 (+128) wr=0.4543 pts=-1.5411 best=C6 | officialVisits=128 (+128) wr=0.4635 pts=-1.1659 best=C6 matchVisits=yes dWR=0.0092 dPts=0.3752
+  step 13 ply=64 customVisits=128 (+128) wr=0.5362 pts=1.1805 best=N13 | officialVisits=128 (+128) wr=0.5301 pts=0.8741 best=H14 matchVisits=yes dWR=-0.0062 dPts=-0.3065
+  step 14 ply=65 customVisits=285 (+128) wr=0.4466 pts=-1.9076 best=C6 | officialVisits=285 (+285) wr=0.4648 pts=-1.1499 best=C6 matchVisits=yes dWR=0.0182 dPts=0.7577
+  step 15 ply=66 customVisits=132 (+128) wr=0.5425 pts=1.4296 best=N13 | officialVisits=132 (+132) wr=0.5450 pts=1.5585 best=N13 matchVisits=yes dWR=0.0025 dPts=0.1289
+  step 16 ply=67 customVisits=128 (+128) wr=0.4714 pts=-0.8769 best=C6 | officialVisits=128 (+128) wr=0.4748 pts=-0.7136 best=C6 matchVisits=yes dWR=0.0034 dPts=0.1632
+  step 17 ply=68 customVisits=350 (+128) wr=0.5237 pts=0.6990 best=F4 | officialVisits=350 (+350) wr=0.5192 pts=0.5319 best=F4 matchVisits=yes dWR=-0.0045 dPts=-0.1671
+  step 18 ply=71 customVisits=500 (+128) wr=0.4793 pts=-0.4245 best=F3 | officialVisits=500 (+500) wr=0.4880 pts=-0.0465 best=F3 matchVisits=yes dWR=0.0087 dPts=0.3781
+  step 19 ply=74 customVisits=132 (+128) wr=0.7627 pts=10.4797 best=N4 | officialVisits=132 (+132) wr=0.5613 pts=2.2569 best=N4 matchVisits=yes dWR=-0.2014 dPts=-8.2228
+  step 20 ply=75 customVisits=509 (+128) wr=0.3330 pts=-6.5063 best=N3 | officialVisits=509 (+509) wr=0.4352 pts=-2.3713 best=N3 matchVisits=yes dWR=0.1022 dPts=4.1350
+  step 21 ply=73 customVisits=399 (+128) wr=0.3882 pts=-4.2420 best=F3 | officialVisits=399 (+399) wr=0.4570 pts=-1.4679 best=N13 matchVisits=yes dWR=0.0687 dPts=2.7740
+  step 22 ply=70 customVisits=263 (+128) wr=0.5216 pts=0.4365 best=B5 | officialVisits=263 (+263) wr=0.5075 pts=-0.0692 best=B5 matchVisits=yes dWR=-0.0140 dPts=-0.5057
+  step 23 ply=69 customVisits=136 (+128) wr=0.5024 pts=0.5185 best=B7 | officialVisits=136 (+136) wr=0.4960 pts=0.2199 best=B7 matchVisits=yes dWR=-0.0064 dPts=-0.2986
+  step 24 ply=68 customVisits=478 (+128) wr=0.5279 pts=0.8662 best=F4 | officialVisits=478 (+478) wr=0.5180 pts=0.4927 best=F4 matchVisits=yes dWR=-0.0099 dPts=-0.3735
+  step 25 ply=71 customVisits=850 (+128) wr=0.4825 pts=-0.2855 best=F3 | officialVisits=850 (+850) wr=0.4907 pts=0.0525 best=F3 matchVisits=yes dWR=0.0082 dPts=0.3380
+  step 26 ply=70 customVisits=507 (+128) wr=0.5093 pts=-0.0352 best=B5 | officialVisits=507 (+507) wr=0.5054 pts=-0.1649 best=B5 matchVisits=yes dWR=-0.0040 dPts=-0.1297
+  step 27 ply=67 customVisits=256 (+128) wr=0.4598 pts=-1.3836 best=C6 | officialVisits=256 (+256) wr=0.4757 pts=-0.7066 best=C6 matchVisits=yes dWR=0.0159 dPts=0.6769
+  step 28 ply=66 customVisits=260 (+128) wr=0.5457 pts=1.5849 best=N13 | officialVisits=260 (+260) wr=0.5382 pts=1.2833 best=N13 matchVisits=yes dWR=-0.0075 dPts=-0.3016
+  step 29 ply=64 customVisits=256 (+128) wr=0.5674 pts=2.4282 best=E16 | officialVisits=256 (+256) wr=0.5322 pts=1.0119 best=H14 matchVisits=yes dWR=-0.0352 dPts=-1.4163
+  step 30 ply=65 customVisits=535 (+128) wr=0.3960 pts=-3.9266 best=C6 | officialVisits=535 (+535) wr=0.4698 pts=-0.9589 best=C6 matchVisits=yes dWR=0.0738 dPts=2.9676
+  step 31 ply=66 customVisits=389 (+128) wr=0.5494 pts=1.7545 best=C6 | officialVisits=389 (+389) wr=0.5369 pts=1.2120 best=N13 matchVisits=yes dWR=-0.0125 dPts=-0.5425
+GAME OK rating-games_4B78878321F3BA72E8C70012700E0754.sgf steps=32
+game rating-games_239B1C70D8D6A8788BC90CE22A4A4992.sgf moves=150 windowStart=71 window=[71,90]
+  rootSequence(rel): 8 6 7 4 5 6 8 6 7 4 5 2 0 1 4 3 6 5 8 6 4 5 7 9 10 7 10 13 16 14 13 12
+  step  0 ply=78 customVisits=128 (+128) wr=0.7478 pts=11.9635 best=J6 | officialVisits=128 (+128) wr=0.6357 pts=6.4744 best=J7 matchVisits=yes dWR=-0.1122 dPts=-5.4891
+  step  1 ply=76 customVisits=128 (+128) wr=0.6668 pts=7.6139 best=B18 | officialVisits=128 (+128) wr=0.5908 pts=3.9644 best=G17 matchVisits=yes dWR=-0.0760 dPts=-3.6495
+  step  2 ply=77 customVisits=205 (+128) wr=0.2902 pts=-9.3324 best=B15 | officialVisits=205 (+205) wr=0.4041 pts=-3.7250 best=J7 matchVisits=yes dWR=0.1139 dPts=5.6074
+  step  3 ply=74 customVisits=128 (+128) wr=0.6087 pts=4.7412 best=J6 | officialVisits=128 (+128) wr=0.5897 pts=3.9080 best=C13 matchVisits=yes dWR=-0.0190 dPts=-0.8331
+  step  4 ply=75 customVisits=162 (+128) wr=0.3297 pts=-7.4365 best=J1 | officialVisits=162 (+162) wr=0.4066 pts=-3.6192 best=J7 matchVisits=yes dWR=0.0769 dPts=3.8173
+  step  5 ply=76 customVisits=258 (+128) wr=0.7307 pts=11.2535 best=B18 | officialVisits=258 (+258) wr=0.5765 pts=3.1811 best=B18 matchVisits=yes dWR=-0.1542 dPts=-8.0724
+  step  6 ply=78 customVisits=257 (+128) wr=0.7593 pts=12.6524 best=J6 | officialVisits=257 (+257) wr=0.6329 pts=5.9666 best=J7 matchVisits=yes dWR=-0.1264 dPts=-6.6859
+  step  7 ply=76 customVisits=386 (+128) wr=0.7074 pts=9.9344 best=B18 | officialVisits=386 (+386) wr=0.5829 pts=3.5302 best=B18 matchVisits=yes dWR=-0.1245 dPts=-6.4042
+  step  8 ply=77 customVisits=583 (+128) wr=0.2884 pts=-9.8112 best=B15 | officialVisits=583 (+583) wr=0.4024 pts=-3.7278 best=J7 matchVisits=yes dWR=0.1140 dPts=6.0834
+  step  9 ply=74 customVisits=256 (+128) wr=0.6708 pts=7.6749 best=C13 | officialVisits=256 (+256) wr=0.6077 pts=4.7624 best=G7 matchVisits=yes dWR=-0.0631 dPts=-2.9126
+  step 10 ply=75 customVisits=418 (+128) wr=0.2944 pts=-9.5187 best=J1 | officialVisits=418 (+418) wr=0.3927 pts=-4.1420 best=N1 matchVisits=yes dWR=0.0982 dPts=5.3766
+  step 11 ply=72 customVisits=128 (+128) wr=0.6848 pts=8.0169 best=J7 | officialVisits=128 (+128) wr=0.6001 pts=4.4048 best=G7 matchVisits=yes dWR=-0.0848 dPts=-3.6121
+  step 12 ply=70 customVisits=128 (+128) wr=0.5921 pts=4.0331 best=G7 | officialVisits=128 (+128) wr=0.5509 pts=2.0418 best=G6 matchVisits=yes dWR=-0.0412 dPts=-1.9913
+  step 13 ply=71 customVisits=181 (+128) wr=0.3346 pts=-7.3746 best=J1 | officialVisits=181 (+181) wr=0.4217 pts=-3.2861 best=J1 matchVisits=yes dWR=0.0872 dPts=4.0885
+  step 14 ply=74 customVisits=384 (+128) wr=0.6548 pts=6.8345 best=C13 | officialVisits=384 (+384) wr=0.6144 pts=5.0513 best=G7 matchVisits=yes dWR=-0.0404 dPts=-1.7831
+  step 15 ply=73 customVisits=128 (+128) wr=0.3715 pts=-5.8782 best=J7 | officialVisits=128 (+128) wr=0.4247 pts=-2.9542 best=J1 matchVisits=yes dWR=0.0531 dPts=2.9240
+  step 16 ply=76 customVisits=514 (+128) wr=0.6958 pts=9.2244 best=B18 | officialVisits=514 (+514) wr=0.6213 pts=5.4336 best=G7 matchVisits=yes dWR=-0.0745 dPts=-3.7908
+  step 17 ply=75 customVisits=668 (+128) wr=0.3217 pts=-8.0521 best=J7 | officialVisits=668 (+668) wr=0.3862 pts=-4.3994 best=J1 matchVisits=yes dWR=0.0645 dPts=3.6527
+  step 18 ply=78 customVisits=386 (+128) wr=0.7554 pts=12.3312 best=J6 | officialVisits=386 (+386) wr=0.6576 pts=7.4098 best=G7 matchVisits=yes dWR=-0.0977 dPts=-4.9214
+  step 19 ply=76 customVisits=642 (+128) wr=0.6943 pts=9.1617 best=B18 | officialVisits=642 (+642) wr=0.6185 pts=5.2853 best=G7 matchVisits=yes dWR=-0.0758 dPts=-3.8764
+  step 20 ply=74 customVisits=514 (+128) wr=0.6496 pts=6.5538 best=C13 | officialVisits=514 (+514) wr=0.6106 pts=4.7265 best=G7 matchVisits=yes dWR=-0.0390 dPts=-1.8273
+  step 21 ply=75 customVisits=888 (+128) wr=0.3303 pts=-7.5091 best=J7 | officialVisits=888 (+888) wr=0.3851 pts=-4.4724 best=D5 matchVisits=yes dWR=0.0547 dPts=3.0367
+  step 22 ply=77 customVisits=878 (+128) wr=0.3112 pts=-8.6278 best=B15 | officialVisits=878 (+878) wr=0.4061 pts=-3.5752 best=J7 matchVisits=yes dWR=0.0949 dPts=5.0526
+  step 23 ply=79 customVisits=128 (+128) wr=0.2676 pts=-10.2926 best=B13 | officialVisits=128 (+128) wr=0.3753 pts=-4.8848 best=J7 matchVisits=yes dWR=0.1077 dPts=5.4078
+  step 24 ply=80 customVisits=137 (+128) wr=0.7353 pts=10.7672 best=C12 | officialVisits=137 (+137) wr=0.6230 pts=5.4238 best=C12 matchVisits=yes dWR=-0.1123 dPts=-5.3434
+  step 25 ply=77 customVisits=1006 (+128) wr=0.3089 pts=-8.7200 best=B15 | officialVisits=1006 (+1006) wr=0.4053 pts=-3.6014 best=J1 matchVisits=yes dWR=0.0964 dPts=5.1186
+  step 26 ply=80 customVisits=265 (+128) wr=0.7602 pts=12.0828 best=C12 | officialVisits=265 (+265) wr=0.6299 pts=5.7881 best=G7 matchVisits=yes dWR=-0.1304 dPts=-6.2947
+  step 27 ply=83 customVisits=128 (+128) wr=0.3114 pts=-8.1755 best=E18 | officialVisits=128 (+128) wr=0.4296 pts=-2.3785 best=J7 matchVisits=yes dWR=0.1182 dPts=5.7970
+  step 28 ply=86 customVisits=128 (+128) wr=0.7324 pts=10.3492 best=B3 | officialVisits=128 (+128) wr=0.6276 pts=4.9729 best=B3 matchVisits=yes dWR=-0.1048 dPts=-5.3763
+  step 29 ply=84 customVisits=130 (+128) wr=0.6783 pts=7.5515 best=G4 | officialVisits=130 (+130) wr=0.6059 pts=4.0531 best=G4 matchVisits=yes dWR=-0.0723 dPts=-3.4984
+  step 30 ply=83 customVisits=256 (+128) wr=0.2817 pts=-9.6031 best=E18 | officialVisits=256 (+256) wr=0.4233 pts=-2.7369 best=J7 matchVisits=yes dWR=0.1416 dPts=6.8662
+  step 31 ply=82 customVisits=129 (+128) wr=0.6998 pts=9.4069 best=J6 | officialVisits=129 (+129) wr=0.6487 pts=6.7077 best=G7 matchVisits=yes dWR=-0.0510 dPts=-2.6992
+GAME OK rating-games_239B1C70D8D6A8788BC90CE22A4A4992.sgf steps=32
+game rating-games_B326F39D5453BB5E9B763F54428553B3.sgf moves=287 windowStart=69 window=[69,88]
+  rootSequence(rel): 3 6 5 8 9 11 10 13 10 8 6 8 7 9 7 8 10 8 9 8 5 8 11 9 10 11 8 5 8 7 9 11
+  step  0 ply=71 customVisits=128 (+128) wr=0.6328 pts=5.8175 best=E6 | officialVisits=128 (+128) wr=0.6063 pts=4.3290 best=E6 matchVisits=yes dWR=-0.0265 dPts=-1.4886
+  step  1 ply=74 customVisits=128 (+128) wr=0.3540 pts=-6.3589 best=M9 | officialVisits=128 (+128) wr=0.4067 pts=-3.7981 best=P12 matchVisits=yes dWR=0.0527 dPts=2.5608
+  step  2 ply=73 customVisits=146 (+128) wr=0.6359 pts=5.9922 best=F10 | officialVisits=146 (+146) wr=0.6127 pts=4.6331 best=F10 matchVisits=yes dWR=-0.0232 dPts=-1.3591
+  step  3 ply=76 customVisits=140 (+128) wr=0.3705 pts=-5.6763 best=L9 | officialVisits=140 (+140) wr=0.4215 pts=-3.1110 best=L9 matchVisits=yes dWR=0.0510 dPts=2.5653
+  step  4 ply=77 customVisits=173 (+128) wr=0.6162 pts=4.8976 best=K8 | officialVisits=173 (+173) wr=0.5800 pts=3.2260 best=K9 matchVisits=yes dWR=-0.0363 dPts=-1.6716
+  step  5 ply=79 customVisits=128 (+128) wr=0.6258 pts=5.5284 best=O4 | officialVisits=128 (+128) wr=0.6104 pts=4.6713 best=O4 matchVisits=yes dWR=-0.0153 dPts=-0.8571
+  step  6 ply=78 customVisits=128 (+128) wr=0.4263 pts=-3.1297 best=O4 | officialVisits=128 (+128) wr=0.4381 pts=-2.4817 best=O4 matchVisits=yes dWR=0.0118 dPts=0.6480
+  step  7 ply=81 customVisits=128 (+128) wr=0.5538 pts=2.1776 best=P5 | officialVisits=128 (+128) wr=0.5619 pts=2.4792 best=K9 matchVisits=yes dWR=0.0081 dPts=0.3016
+  step  8 ply=78 customVisits=256 (+128) wr=0.4042 pts=-4.0943 best=O4 | officialVisits=256 (+256) wr=0.4401 pts=-2.4275 best=O4 matchVisits=yes dWR=0.0359 dPts=1.6668
+  step  9 ply=76 customVisits=268 (+128) wr=0.3367 pts=-7.1738 best=L9 | officialVisits=268 (+268) wr=0.4212 pts=-3.1554 best=L9 matchVisits=yes dWR=0.0844 dPts=4.0184
+  step 10 ply=74 customVisits=256 (+128) wr=0.3191 pts=-7.9572 best=M9 | officialVisits=256 (+256) wr=0.4098 pts=-3.6335 best=M9 matchVisits=yes dWR=0.0906 dPts=4.3238
+  step 11 ply=76 customVisits=400 (+128) wr=0.2987 pts=-9.1612 best=L9 | officialVisits=400 (+400) wr=0.4214 pts=-3.1546 best=L9 matchVisits=yes dWR=0.1227 dPts=6.0066
+  step 12 ply=75 customVisits=166 (+128) wr=0.6358 pts=5.9555 best=L9 | officialVisits=166 (+166) wr=0.5842 pts=3.4097 best=L9 matchVisits=yes dWR=-0.0516 dPts=-2.5458
+  step 13 ply=77 customVisits=343 (+128) wr=0.6578 pts=6.6599 best=K8 | officialVisits=343 (+343) wr=0.5761 pts=3.1223 best=K9 matchVisits=yes dWR=-0.0817 dPts=-3.5375
+  step 14 ply=75 customVisits=294 (+128) wr=0.6585 pts=7.0749 best=L9 | officialVisits=294 (+294) wr=0.5844 pts=3.4053 best=L9 matchVisits=yes dWR=-0.0741 dPts=-3.6696
+  step 15 ply=76 customVisits=557 (+128) wr=0.3192 pts=-8.1370 best=L9 | officialVisits=557 (+557) wr=0.4218 pts=-3.2207 best=L9 matchVisits=yes dWR=0.1026 dPts=4.9163
+  step 16 ply=78 customVisits=384 (+128) wr=0.3726 pts=-5.4217 best=O4 | officialVisits=384 (+384) wr=0.4393 pts=-2.4622 best=O4 matchVisits=yes dWR=0.0667 dPts=2.9595
+  step 17 ply=76 customVisits=685 (+128) wr=0.3267 pts=-7.7505 best=L9 | officialVisits=685 (+685) wr=0.4240 pts=-3.0602 best=L9 matchVisits=yes dWR=0.0973 dPts=4.6903
+  step 18 ply=77 customVisits=505 (+128) wr=0.6905 pts=8.2776 best=K8 | officialVisits=505 (+505) wr=0.5749 pts=3.0888 best=K9 matchVisits=yes dWR=-0.1155 dPts=-5.1888
+  step 19 ply=76 customVisits=813 (+128) wr=0.3318 pts=-7.5055 best=P12 | officialVisits=813 (+813) wr=0.4201 pts=-3.2777 best=L9 matchVisits=yes dWR=0.0883 dPts=4.2278
+  step 20 ply=73 customVisits=274 (+128) wr=0.7094 pts=9.8233 best=M8 | officialVisits=274 (+274) wr=0.6083 pts=4.3623 best=F10 matchVisits=yes dWR=-0.1011 dPts=-5.4610
+  step 21 ply=76 customVisits=941 (+128) wr=0.3358 pts=-7.3197 best=P12 | officialVisits=941 (+941) wr=0.4184 pts=-3.3441 best=L9 matchVisits=yes dWR=0.0826 dPts=3.9757
+  step 22 ply=79 customVisits=258 (+128) wr=0.6483 pts=6.4865 best=O4 | officialVisits=258 (+258) wr=0.6099 pts=4.6823 best=O4 matchVisits=yes dWR=-0.0384 dPts=-1.8042
+  step 23 ply=77 customVisits=649 (+128) wr=0.6724 pts=7.4839 best=K8 | officialVisits=649 (+649) wr=0.5850 pts=3.5940 best=K9 matchVisits=yes dWR=-0.0874 dPts=-3.8899
+  step 24 ply=78 customVisits=671 (+128) wr=0.3660 pts=-5.8182 best=O4 | officialVisits=671 (+671) wr=0.4383 pts=-2.5279 best=O4 matchVisits=yes dWR=0.0723 dPts=3.2903
+  step 25 ply=79 customVisits=386 (+128) wr=0.6935 pts=8.6265 best=O4 | officialVisits=386 (+386) wr=0.6168 pts=5.0627 best=O4 matchVisits=yes dWR=-0.0767 dPts=-3.5637
+  step 26 ply=76 customVisits=1069 (+128) wr=0.3425 pts=-6.9968 best=L9 | officialVisits=1069 (+1069) wr=0.4134 pts=-3.5913 best=L9 matchVisits=yes dWR=0.0709 dPts=3.4054
+  step 27 ply=73 customVisits=402 (+128) wr=0.6865 pts=8.6121 best=M8 | officialVisits=402 (+402) wr=0.6055 pts=4.2565 best=K10 matchVisits=yes dWR=-0.0810 dPts=-4.3556
+  step 28 ply=76 customVisits=1197 (+128) wr=0.3476 pts=-6.7449 best=L9 | officialVisits=1197 (+1197) wr=0.4096 pts=-3.7937 best=L9 matchVisits=yes dWR=0.0620 dPts=2.9512
+  step 29 ply=75 customVisits=449 (+128) wr=0.7007 pts=9.4188 best=L9 | officialVisits=449 (+449) wr=0.5871 pts=3.5451 best=L9 matchVisits=yes dWR=-0.1136 dPts=-5.8737
+  step 30 ply=77 customVisits=1020 (+128) wr=0.6504 pts=6.4900 best=K8 | officialVisits=1020 (+1020) wr=0.5811 pts=3.4400 best=K9 matchVisits=yes dWR=-0.0693 dPts=-3.0501
+  step 31 ply=79 customVisits=514 (+128) wr=0.6782 pts=7.9253 best=O4 | officialVisits=514 (+514) wr=0.6143 pts=4.8819 best=O4 matchVisits=yes dWR=-0.0638 dPts=-3.0435
+GAME OK rating-games_B326F39D5453BB5E9B763F54428553B3.sgf steps=32
+game rating-games_14E1E2884E5670A244DB47205E1B5516.sgf moves=151 windowStart=86 window=[86,105]
+  rootSequence(rel): 14 13 12 15 14 13 14 13 12 13 10 7 9 12 11 10 8 10 7 5 3 5 8 7 10 8 5 8 7 6 4 2
+  step  0 ply=99 customVisits=128 (+128) wr=0.8037 pts=10.2618 best=H5 | officialVisits=128 (+128) wr=0.6872 pts=5.7978 best=H5 matchVisits=yes dWR=-0.1165 dPts=-4.4640
+  step  1 ply=98 customVisits=128 (+128) wr=0.2282 pts=-8.1156 best=G5 | officialVisits=128 (+128) wr=0.3145 pts=-4.7857 best=S14 matchVisits=yes dWR=0.0863 dPts=3.3299
+  step  2 ply=97 customVisits=128 (+128) wr=0.7975 pts=9.6522 best=C2 | officialVisits=128 (+128) wr=0.6793 pts=4.6105 best=G5 matchVisits=yes dWR=-0.1182 dPts=-5.0418
+  step  3 ply=100 customVisits=128 (+128) wr=0.2138 pts=-8.6247 best=M3 | officialVisits=128 (+128) wr=0.3403 pts=-3.9795 best=S14 matchVisits=yes dWR=0.1265 dPts=4.6452
+  step  4 ply=99 customVisits=257 (+128) wr=0.8312 pts=11.6636 best=H5 | officialVisits=257 (+257) wr=0.6959 pts=5.8848 best=J11 matchVisits=yes dWR=-0.1354 dPts=-5.7788
+  step  5 ply=98 customVisits=256 (+128) wr=0.1835 pts=-10.1996 best=G5 | officialVisits=256 (+256) wr=0.3148 pts=-4.6788 best=M3 matchVisits=yes dWR=0.1313 dPts=5.5208
+  step  6 ply=99 customVisits=385 (+128) wr=0.8355 pts=12.3733 best=H5 | officialVisits=385 (+385) wr=0.6856 pts=5.5678 best=J11 matchVisits=yes dWR=-0.1499 dPts=-6.8055
+  step  7 ply=98 customVisits=384 (+128) wr=0.1907 pts=-10.0081 best=G5 | officialVisits=384 (+384) wr=0.3124 pts=-4.8148 best=M3 matchVisits=yes dWR=0.1218 dPts=5.1933
+  step  8 ply=97 customVisits=256 (+128) wr=0.8275 pts=11.1636 best=C2 | officialVisits=256 (+256) wr=0.6843 pts=4.6917 best=G4 matchVisits=yes dWR=-0.1432 dPts=-6.4719
+  step  9 ply=98 customVisits=513 (+128) wr=0.2080 pts=-9.1754 best=G5 | officialVisits=513 (+513) wr=0.3195 pts=-4.6342 best=S14 matchVisits=yes dWR=0.1115 dPts=4.5412
+  step 10 ply=95 customVisits=128 (+128) wr=0.7619 pts=8.0513 best=C8 | officialVisits=128 (+128) wr=0.6786 pts=4.7497 best=H6 matchVisits=yes dWR=-0.0834 dPts=-3.3016
+  step 11 ply=92 customVisits=128 (+128) wr=0.2160 pts=-9.2979 best=M3 | officialVisits=128 (+128) wr=0.3181 pts=-5.2692 best=S14 matchVisits=yes dWR=0.1021 dPts=4.0287
+  step 12 ply=94 customVisits=128 (+128) wr=0.1814 pts=-10.7003 best=M3 | officialVisits=128 (+128) wr=0.3264 pts=-4.6168 best=S14 matchVisits=yes dWR=0.1450 dPts=6.0835
+  step 13 ply=97 customVisits=384 (+128) wr=0.8349 pts=11.7972 best=C2 | officialVisits=384 (+384) wr=0.6747 pts=4.4895 best=G4 matchVisits=yes dWR=-0.1602 dPts=-7.3077
+  step 14 ply=96 customVisits=128 (+128) wr=0.2491 pts=-7.3095 best=M3 | officialVisits=128 (+128) wr=0.3231 pts=-4.3819 best=G6 matchVisits=yes dWR=0.0740 dPts=2.9276
+  step 15 ply=95 customVisits=260 (+128) wr=0.7920 pts=9.3950 best=C8 | officialVisits=260 (+260) wr=0.6819 pts=4.8562 best=H6 matchVisits=yes dWR=-0.1101 dPts=-4.5388
+  step 16 ply=93 customVisits=129 (+128) wr=0.8426 pts=12.4403 best=C7 | officialVisits=129 (+129) wr=0.6939 pts=5.3795 best=C7 matchVisits=yes dWR=-0.1487 dPts=-7.0608
+  step 17 ply=95 customVisits=389 (+128) wr=0.8059 pts=10.2006 best=C8 | officialVisits=389 (+389) wr=0.6887 pts=5.0523 best=G6 matchVisits=yes dWR=-0.1172 dPts=-5.1483
+  step 18 ply=92 customVisits=256 (+128) wr=0.1802 pts=-11.1547 best=M3 | officialVisits=256 (+256) wr=0.3208 pts=-5.1361 best=S14 matchVisits=yes dWR=0.1406 dPts=6.0185
+  step 19 ply=90 customVisits=128 (+128) wr=0.2460 pts=-8.5001 best=M3 | officialVisits=128 (+128) wr=0.3347 pts=-5.0796 best=S14 matchVisits=yes dWR=0.0887 dPts=3.4205
+  step 20 ply=88 customVisits=128 (+128) wr=0.2283 pts=-9.5226 best=D19 | officialVisits=128 (+128) wr=0.3549 pts=-4.4983 best=S14 matchVisits=yes dWR=0.1266 dPts=5.0243
+  step 21 ply=90 customVisits=269 (+128) wr=0.2048 pts=-10.4236 best=M3 | officialVisits=269 (+269) wr=0.3307 pts=-5.2929 best=S14 matchVisits=yes dWR=0.1259 dPts=5.1307
+  step 22 ply=93 customVisits=258 (+128) wr=0.8400 pts=12.5284 best=C7 | officialVisits=258 (+258) wr=0.6939 pts=5.3977 best=C7 matchVisits=yes dWR=-0.1461 dPts=-7.1307
+  step 23 ply=92 customVisits=384 (+128) wr=0.1914 pts=-10.7710 best=M3 | officialVisits=384 (+384) wr=0.3383 pts=-4.6154 best=M3 matchVisits=yes dWR=0.1468 dPts=6.1556
+  step 24 ply=95 customVisits=531 (+128) wr=0.7890 pts=9.4796 best=C8 | officialVisits=531 (+531) wr=0.6896 pts=5.2718 best=L3 matchVisits=yes dWR=-0.0994 dPts=-4.2078
+  step 25 ply=93 customVisits=396 (+128) wr=0.8090 pts=10.9112 best=C7 | officialVisits=396 (+396) wr=0.6911 pts=5.3017 best=L3 matchVisits=yes dWR=-0.1179 dPts=-5.6095
+  step 26 ply=90 customVisits=397 (+128) wr=0.2180 pts=-10.0227 best=S14 | officialVisits=397 (+397) wr=0.3224 pts=-5.5108 best=S14 matchVisits=yes dWR=0.1045 dPts=4.5119
+  step 27 ply=93 customVisits=524 (+128) wr=0.7970 pts=10.3029 best=C7 | officialVisits=524 (+524) wr=0.6906 pts=5.2855 best=C7 matchVisits=yes dWR=-0.1064 dPts=-5.0174
+  step 28 ply=92 customVisits=514 (+128) wr=0.2121 pts=-9.8305 best=S14 | officialVisits=514 (+514) wr=0.3502 pts=-4.1892 best=M3 matchVisits=yes dWR=0.1381 dPts=5.6413
+  step 29 ply=91 customVisits=131 (+128) wr=0.7420 pts=7.7097 best=H13 | officialVisits=131 (+131) wr=0.6758 pts=5.1147 best=H13 matchVisits=yes dWR=-0.0662 dPts=-2.5950
+  step 30 ply=89 customVisits=142 (+128) wr=0.7111 pts=6.9864 best=B19 | officialVisits=142 (+142) wr=0.6637 pts=5.1165 best=B19 matchVisits=yes dWR=-0.0475 dPts=-1.8699
+  step 31 ply=87 customVisits=128 (+128) wr=0.8274 pts=12.2720 best=B18 | officialVisits=128 (+128) wr=0.6467 pts=4.6025 best=B18 matchVisits=yes dWR=-0.1807 dPts=-7.6695
+GAME OK rating-games_14E1E2884E5670A244DB47205E1B5516.sgf steps=32
+game rating-games_8490A19DB5D0991DED209B7A7C8B185E.sgf moves=186 windowStart=76 window=[76,95]
+  rootSequence(rel): 11 9 10 11 13 10 7 9 10 8 7 9 8 9 10 9 7 10 7 8 6 9 6 8 7 10 7 6 4 5 3 6
+  step  0 ply=86 customVisits=128 (+128) wr=0.5036 pts=0.1848 best=C15 | officialVisits=128 (+128) wr=0.4924 pts=-0.2928 best=P2 matchVisits=yes dWR=-0.0112 dPts=-0.4776
+  step  1 ply=84 customVisits=128 (+128) wr=0.5364 pts=1.5971 best=P2 | officialVisits=128 (+128) wr=0.5039 pts=0.3272 best=P2 matchVisits=yes dWR=-0.0324 dPts=-1.2699
+  step  2 ply=85 customVisits=148 (+128) wr=0.5123 pts=0.5134 best=C16 | officialVisits=148 (+148) wr=0.4979 pts=-0.0897 best=C16 matchVisits=yes dWR=-0.0145 dPts=-0.6031
+  step  3 ply=86 customVisits=365 (+128) wr=0.4917 pts=-0.3726 best=C15 | officialVisits=365 (+365) wr=0.5017 pts=0.0089 best=C15 matchVisits=yes dWR=0.0100 dPts=0.3814
+  step  4 ply=88 customVisits=309 (+128) wr=0.5061 pts=0.1107 best=G16 | officialVisits=309 (+309) wr=0.4930 pts=-0.3139 best=G16 matchVisits=yes dWR=-0.0131 dPts=-0.4246
+  step  5 ply=85 customVisits=276 (+128) wr=0.4828 pts=-0.6515 best=C16 | officialVisits=276 (+276) wr=0.4988 pts=-0.0098 best=C16 matchVisits=yes dWR=0.0160 dPts=0.6417
+  step  6 ply=82 customVisits=128 (+128) wr=0.5943 pts=3.8925 best=P2 | officialVisits=128 (+128) wr=0.5378 pts=1.6557 best=C17 matchVisits=yes dWR=-0.0565 dPts=-2.2369
+  step  7 ply=84 customVisits=256 (+128) wr=0.5595 pts=2.4668 best=F14 | officialVisits=256 (+256) wr=0.5229 pts=1.0412 best=F14 matchVisits=yes dWR=-0.0366 dPts=-1.4256
+  step  8 ply=85 customVisits=414 (+128) wr=0.4590 pts=-1.5953 best=C16 | officialVisits=414 (+414) wr=0.4883 pts=-0.4266 best=C16 matchVisits=yes dWR=0.0293 dPts=1.1686
+  step  9 ply=83 customVisits=132 (+128) wr=0.4473 pts=-2.1733 best=G16 | officialVisits=132 (+132) wr=0.4681 pts=-1.4226 best=E17 matchVisits=yes dWR=0.0208 dPts=0.7507
+  step 10 ply=82 customVisits=256 (+128) wr=0.5917 pts=3.7804 best=P2 | officialVisits=256 (+256) wr=0.5616 pts=2.5882 best=C17 matchVisits=yes dWR=-0.0302 dPts=-1.1922
+  step 11 ply=84 customVisits=389 (+128) wr=0.5947 pts=3.9366 best=F14 | officialVisits=389 (+389) wr=0.5042 pts=0.3005 best=F14 matchVisits=yes dWR=-0.0906 dPts=-3.6361
+  step 12 ply=83 customVisits=291 (+128) wr=0.3980 pts=-4.3589 best=G16 | officialVisits=291 (+291) wr=0.4631 pts=-1.5605 best=E17 matchVisits=yes dWR=0.0651 dPts=2.7984
+  step 13 ply=84 customVisits=518 (+128) wr=0.6300 pts=5.5662 best=F14 | officialVisits=518 (+518) wr=0.5135 pts=0.6272 best=F14 matchVisits=yes dWR=-0.1165 dPts=-4.9390
+  step 14 ply=85 customVisits=542 (+128) wr=0.4263 pts=-3.0714 best=C16 | officialVisits=542 (+542) wr=0.4871 pts=-0.4844 best=C16 matchVisits=yes dWR=0.0608 dPts=2.5870
+  step 15 ply=84 customVisits=646 (+128) wr=0.6286 pts=5.5030 best=F14 | officialVisits=646 (+646) wr=0.5141 pts=0.6687 best=F14 matchVisits=yes dWR=-0.1145 dPts=-4.8344
+  step 16 ply=82 customVisits=384 (+128) wr=0.6303 pts=5.7802 best=P2 | officialVisits=384 (+384) wr=0.5732 pts=3.1112 best=C17 matchVisits=yes dWR=-0.0571 dPts=-2.6690
+  step 17 ply=85 customVisits=670 (+128) wr=0.3994 pts=-4.4281 best=C16 | officialVisits=670 (+670) wr=0.4889 pts=-0.4390 best=C16 matchVisits=yes dWR=0.0896 dPts=3.9891
+  step 18 ply=82 customVisits=512 (+128) wr=0.6329 pts=5.9603 best=F16 | officialVisits=512 (+512) wr=0.5694 pts=2.9457 best=C17 matchVisits=yes dWR=-0.0635 dPts=-3.0146
+  step 19 ply=83 customVisits=672 (+128) wr=0.3709 pts=-5.7655 best=G16 | officialVisits=672 (+672) wr=0.4666 pts=-1.4154 best=E17 matchVisits=yes dWR=0.0956 dPts=4.3502
+  step 20 ply=81 customVisits=128 (+128) wr=0.4696 pts=-1.3043 best=E14 | officialVisits=128 (+128) wr=0.4690 pts=-1.2979 best=E14 matchVisits=yes dWR=-0.0005 dPts=0.0063
+  step 21 ply=84 customVisits=781 (+128) wr=0.6247 pts=5.3050 best=F14 | officialVisits=781 (+781) wr=0.5036 pts=0.2511 best=F14 matchVisits=yes dWR=-0.1211 dPts=-5.0540
+  step 22 ply=81 customVisits=256 (+128) wr=0.4525 pts=-1.9156 best=E14 | officialVisits=256 (+256) wr=0.4648 pts=-1.4815 best=G11 matchVisits=yes dWR=0.0124 dPts=0.4340
+  step 23 ply=83 customVisits=802 (+128) wr=0.3743 pts=-5.5723 best=G16 | officialVisits=802 (+802) wr=0.4761 pts=-1.0288 best=E17 matchVisits=yes dWR=0.1018 dPts=4.5435
+  step 24 ply=82 customVisits=642 (+128) wr=0.6308 pts=5.7982 best=F16 | officialVisits=642 (+642) wr=0.5748 pts=3.1659 best=C17 matchVisits=yes dWR=-0.0560 dPts=-2.6323
+  step 25 ply=85 customVisits=798 (+128) wr=0.4026 pts=-4.2339 best=C16 | officialVisits=798 (+798) wr=0.4901 pts=-0.3499 best=C16 matchVisits=yes dWR=0.0875 dPts=3.8841
+  step 26 ply=82 customVisits=770 (+128) wr=0.6279 pts=5.6193 best=F16 | officialVisits=770 (+770) wr=0.5712 pts=3.0081 best=C17 matchVisits=yes dWR=-0.0567 dPts=-2.6112
+  step 27 ply=81 customVisits=384 (+128) wr=0.4324 pts=-2.7236 best=E14 | officialVisits=384 (+384) wr=0.4606 pts=-1.6493 best=G11 matchVisits=yes dWR=0.0282 dPts=1.0743
+  step 28 ply=79 customVisits=128 (+128) wr=0.4298 pts=-2.8620 best=G11 | officialVisits=128 (+128) wr=0.4356 pts=-2.7260 best=G11 matchVisits=yes dWR=0.0058 dPts=0.1360
+  step 29 ply=80 customVisits=132 (+128) wr=0.7509 pts=10.3128 best=P2 | officialVisits=132 (+132) wr=0.5224 pts=1.0835 best=P2 matchVisits=yes dWR=-0.2285 dPts=-9.2293
+  step 30 ply=78 customVisits=128 (+128) wr=0.5916 pts=3.9133 best=F9 | officialVisits=128 (+128) wr=0.5075 pts=0.4563 best=P2 matchVisits=yes dWR=-0.0841 dPts=-3.4571
+  step 31 ply=81 customVisits=512 (+128) wr=0.4013 pts=-4.1670 best=E14 | officialVisits=512 (+512) wr=0.4658 pts=-1.4721 best=G11 matchVisits=yes dWR=0.0645 dPts=2.6949
+GAME OK rating-games_8490A19DB5D0991DED209B7A7C8B185E.sgf steps=32
+report written: /Users/zyx/Desktop/projects/Qixi/core/oracle/artifacts/correctness_report.json
+log written: /Users/zyx/Desktop/projects/Qixi/core/oracle/artifacts/correctness.log
+summary: games=8 infraFailures=0 steps=256 visitMismatches=0
+NOTE: winrate/score divergence between custom PUCT and official Search is expected until search policy equivalence is proven; this run matched visit budgets and exercised root transfers fully.
