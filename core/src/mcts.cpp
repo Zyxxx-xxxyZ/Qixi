@@ -699,10 +699,10 @@ bool MCTSStore::expandNode(NodeId nodeId, const LeafPayload& leaf, const std::ar
 }
 
 bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
-  path.nodes.clear();
-  path.actions.clear();
+  path.clear();
   NodeId current = root;
   path.nodes.push_back(current);
+  path.recordDepth(current, nodes[current].ply);
 
   while(true) {
     Node& node = nodes[current];
@@ -734,6 +734,7 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
     actions[actionId].child = child;
     path.actions.push_back(actionId);
     path.nodes.push_back(child);
+    path.recordDepth(child, nodes[child].ply);
     current = child;
   }
 }
@@ -895,9 +896,11 @@ bool MCTSStore::runPlayout() {
       return false;
   }
 
-  // Label this leaf as visited by the active root (updates minVisitedRootDepth).
+  // Capture d_min *before* labeling so backup can avoid double-updating the
+  // segment that was already trained under a deeper historical root.
+  const uint32_t priorMinVisitedRootDepth = nodes[leafNode].minVisitedRootDepth;
   markVisitedByCurrentRoot(leafNode);
-  backup(path, leaf);
+  backup(path, leaf, priorMinVisitedRootDepth);
   playoutSeq += 1;
   return true;
 }
@@ -909,11 +912,76 @@ void MCTSStore::runPlayouts(uint32_t count) {
   }
 }
 
-void MCTSStore::backup(const Path& path, const LeafPayload& leaf) {
-  for(size_t i = 0; i < path.nodes.size(); ++i) {
+void MCTSStore::backup(
+  const Path& path,
+  const LeafPayload& leaf,
+  uint32_t priorMinVisitedRootDepth
+) {
+  if(path.nodes.empty())
+    return;
+
+  // Case 1: leaf has never been searched under any root → full path to root.
+  if(priorMinVisitedRootDepth == kNeverVisitedRootDepth) {
+    for(size_t i = 0; i < path.nodes.size(); ++i) {
+      updateNodeStats(nodes[path.nodes[i]], leaf, leaf.weight);
+      if(i > 0)
+        updateActionStats(actions[path.actions[i - 1]], leaf, leaf.weight);
+    }
+    return;
+  }
+
+  // Case 2: leaf was previously visited under a deeper root (d_min > d(R)).
+  // Treating the leaf as new for the current (shallower) root is correct, but
+  // re-backing the whole path double-updates parent(leaf) … node@d_min.
+  // Correct/efficient backup:
+  //   - always update the leaf itself
+  //   - then update father(node at absolute depth d_min on this path) … current root
+  //   - do NOT update node@d_min through parent(leaf)
+
+  const NodeId leafId = path.nodes.back();
+  updateNodeStats(nodes[leafId], leaf, leaf.weight);
+
+  // Locate the historical-root node on this path at absolute depth d_min.
+  size_t histIdx = path.nodes.size();
+  if(priorMinVisitedRootDepth < kSearchChainDepthMapLen) {
+    const NodeId mapped = path.byDepth[priorMinVisitedRootDepth];
+    if(mapped != kInvalidNode) {
+      for(size_t i = 0; i < path.nodes.size(); ++i) {
+        if(path.nodes[i] == mapped) {
+          histIdx = i;
+          break;
+        }
+      }
+    }
+  }
+  if(histIdx >= path.nodes.size()) {
+    for(size_t i = 0; i < path.nodes.size(); ++i) {
+      if(nodes[path.nodes[i]].ply == priorMinVisitedRootDepth) {
+        histIdx = i;
+        break;
+      }
+    }
+  }
+  if(histIdx >= path.nodes.size() || histIdx == 0) {
+    // Historical root missing or is the current root (should not happen when
+    // priorMin > d(R)); leaf-only update is the safe partial credit.
+    return;
+  }
+
+  // path.nodes[0] = current root … path.nodes[histIdx] = node@d_min (= S).
+  // Update nodes [0 .. histIdx-1] (father of S back to root).
+  // Update actions only on edges fully above S (not the edge into S).
+  for(size_t i = 0; i < histIdx; ++i) {
+    // Leaf may equal path.nodes[histIdx] when d_min node's ply equals leaf;
+    // avoid double-updating the leaf if it also appears in this range (it won't
+    // for histIdx < last, and when histIdx == last the loop is parents only).
+    if(path.nodes[i] == leafId)
+      continue;
     updateNodeStats(nodes[path.nodes[i]], leaf, leaf.weight);
-    if(i > 0)
-      updateActionStats(actions[path.actions[i - 1]], leaf, leaf.weight);
+    // Action i connects nodes[i] → nodes[i+1]. Include only when i+1 < histIdx
+    // so we never touch the action into S or anything below S.
+    if(i + 1 < histIdx)
+      updateActionStats(actions[path.actions[i]], leaf, leaf.weight);
   }
 }
 

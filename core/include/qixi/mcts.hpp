@@ -223,6 +223,19 @@ private:
   struct Path {
     std::vector<NodeId> nodes;
     std::vector<ActionId> actions;
+    // Absolute depth (node.ply) → node on this selection path. Filled during select.
+    std::array<NodeId, kSearchChainDepthMapLen> byDepth{};
+
+    void clear() {
+      nodes.clear();
+      actions.clear();
+      byDepth.fill(kInvalidNode);
+    }
+
+    void recordDepth(NodeId id, uint32_t ply) {
+      if(ply < kSearchChainDepthMapLen)
+        byDepth[ply] = id;
+    }
   };
 
   struct ThreadState {
@@ -265,7 +278,10 @@ private:
   float policyPrior(const Node& parent, Move move) const;
   float valueForSelection(const ScalarStats& stats, Color pla) const;
   bool evaluateLeaf(const ThreadState& state, NodeId leafNode, bool isRoot, LeafPayload& leaf);
-  void backup(const Path& path, const LeafPayload& leaf);
+  // priorMinVisitedRootDepth is the leaf's d_min *before* markVisitedByCurrentRoot.
+  //   - never visited (∞): backup entire path leaf → current root
+  //   - previously visited under a deeper root: update leaf + father(node@d_min) → root
+  void backup(const Path& path, const LeafPayload& leaf, uint32_t priorMinVisitedRootDepth);
   void updateNodeStats(Node& node, const LeafPayload& leaf, float weight);
   void updateActionStats(Action& action, const LeafPayload& leaf, float weight);
   void updateOwnershipMean(Node& node, const std::array<float, kOwnershipDim>& ownership, float weight);

@@ -74,14 +74,34 @@ For a fixed active root \(R\):
    - uses the **stored NN** if present, otherwise evaluates the net once and
      stores it;
    - expands the node if still unexpanded;
-   - updates \(d_{\min}(N) \leftarrow \min(d_{\min}(N), d(R))\);
-   - backups along the path **stopping at \(R\)**.
+   - records \(d_{\min}^{\mathrm{old}}(N)\) then updates
+     \(d_{\min}(N) \leftarrow \min(d_{\min}(N), d(R))\);
+   - runs **split backpropagation** (below).
 3. Later playouts under the same root may **traverse** already-visited expanded
    nodes (normal MCTS selection) but must **not** treat them again as brand-new
    leaves for \(R\).
 4. The search must **not** skip a first visit for \(R\) merely because another
    root already expanded \(N\). The min-depth test is the authority, not
    `state == expanded` alone.
+
+### Split backpropagation (required; naive full-path backup is wrong)
+
+During selection, keep a fixed map of length **2048**:
+
+\[
+\mathrm{byDepth}[d] = \text{node on the current path with absolute ply } d.
+\]
+
+Let \(L\) be the first-visit leaf under current root \(R\), and let
+\(d_{\min}^{\mathrm{old}}(L)\) be its label **before** this visit updates it.
+
+| Case | Backup |
+| --- | --- |
+| \(d_{\min}^{\mathrm{old}}(L)=+\infty\) (never searched) | Update **entire** path \(L \to R\) (nodes and edges). |
+| \(d_{\min}^{\mathrm{old}}(L)\) finite (searched under a deeper root) | \(L\) is correctly treated as **new** for \(R\). But parents of \(L\) up through the node \(S=\mathrm{byDepth}[d_{\min}^{\mathrm{old}}(L)]\) were already updated under that deeper root — full-path backup would **double-update** them. Instead: update **\(L\) itself**, then update from **\(\mathrm{parent}(S)\)** back to **\(R\)** only (not \(S\) and not the \(S\rightsquigarrow L\) segment). |
+
+This is the efficient criterion-correct form of inheritance for statistics when a
+shallower root first-visits a node that a descendant root already expanded.
 
 ### Why this is not optional
 
@@ -117,6 +137,8 @@ persistent layer.
 | \(R\) visited \(N\)? | `MCTSStore::rootHasVisitedNode` |
 | Mark visit | `MCTSStore::markVisitedByCurrentRoot` |
 | First-visit barrier | `selectPathToLeaf` stops if `!expanded \|\| !rootHasVisited` |
+| Path depth map (2048) | `Path::byDepth` / `kSearchChainDepthMapLen` |
+| Split backup | `backup(..., priorMinVisitedRootDepth)` |
 | Prefer stored NN | `evaluateLeaf` → `loadStoredNNOutput` before evaluator |
 | Persist format | version **4** |
 

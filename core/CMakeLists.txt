@@ -52,6 +52,12 @@ add_executable(qixi_min_root_depth_visits
 
 target_link_libraries(qixi_min_root_depth_visits PRIVATE qixi_core)
 
+add_executable(qixi_split_backup
+  tests/qixi_split_backup.cpp
+)
+
+target_link_libraries(qixi_split_backup PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
@@ -59,3 +65,4 @@ add_test(NAME qixi_core_store_bundle COMMAND qixi_core_store_bundle)
 add_test(NAME qixi_oracle_scaffold COMMAND qixi_oracle_scaffold)
 add_test(NAME qixi_analysis_api_smoke COMMAND qixi_analysis_api_smoke)
 add_test(NAME qixi_min_root_depth_visits COMMAND qixi_min_root_depth_visits)
+add_test(NAME qixi_split_backup COMMAND qixi_split_backup)
