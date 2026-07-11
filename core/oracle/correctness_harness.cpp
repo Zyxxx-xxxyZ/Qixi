@@ -287,14 +287,15 @@ bool runOneGame(
     return false;
   }
   if(gUseTestNnPolicyOnly) {
-    // Official upstream Search has no policy-only tree selector; attempt fails closed.
-    std::string offErr;
-    if(official.enableTestNnPolicyOnlySelection(core::MCTSStore::kTestSelectionModeAllowToken, &offErr)) {
-      // If a future official wrapper supports it, require it to be active.
-      if(!official.testNnPolicyOnlySelectionEnabled()) {
-        record.error = "official claimed policy-only enable but mode inactive";
-        return false;
-      }
+    // TEST-ONLY: official harness path switches to NN-policy-only selection
+    // (non-persistent tree). Production/default official path remains PUCT Search.
+    if(!official.enableTestNnPolicyOnlySelection(core::MCTSStore::kTestSelectionModeAllowToken, &err)) {
+      record.error = std::string("official enableTestNnPolicyOnlySelection: ") + err;
+      return false;
+    }
+    if(!official.testNnPolicyOnlySelectionEnabled()) {
+      record.error = "official testNnPolicyOnly selection failed to activate";
+      return false;
     }
   }
 
@@ -488,9 +489,9 @@ int main(int argc, char** argv) {
   tee("seed=" + std::to_string(seed) + "\n");
   tee(std::string("testNnPolicyOnly=") + (gUseTestNnPolicyOnly ? "true" : "false") + "\n");
   if(gUseTestNnPolicyOnly) {
-    tee("NOTE: custom selection is NN-policy-only (visit-independent). "
-        "Official Search still uses native PUCT unless it implements the test mode; "
-        "root-visit matching alone remains insufficient for full equivalence.\n");
+    tee("NOTE: BOTH engines use NN-policy-only selection for this test. "
+        "Custom keeps a persistent store; official rebuilds a fresh store on each "
+        "setRootPly (non-persistent). See docs/oracle-test-discrepancies.md.\n");
   }
 
   std::string err;

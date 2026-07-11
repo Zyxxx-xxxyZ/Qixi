@@ -8,8 +8,11 @@
 
 namespace qixi::oracle {
 
-// Official lightvector/KataGo Search backend (no persistence — upstream has none).
-// Root changes use stock setPosition; visit budgets via maxVisits/maxPlayouts.
+// Official analysis backend for the oracle harness.
+// - Default: upstream Search + PUCT (setPosition, runWholeSearch).
+// - TEST-ONLY (enableTestNnPolicyOnlySelection): NN-policy-only selection via a
+//   fresh MCTSStore each root (not used in production). See
+//   docs/oracle-test-discrepancies.md.
 std::unique_ptr<analysis::AnalysisEngine> createOfficialAnalysisEngine(HostNNContext* ctx);
 
 } // namespace qixi::oracle

@@ -27,8 +27,9 @@ target_include_directories(qixi_oracle_correctness PRIVATE
 
 target_compile_definitions(qixi_oracle_correctness PRIVATE
   USE_EIGEN_BACKEND
-  # Harness is allowed to request test selection mode; the mode still requires
-  # linking qixi_core_testing and the allow token at runtime.
+  # TEST-ONLY: allow official/custom policy-only selection in this binary.
+  # Production app must never set this. Still requires allow token at runtime.
+  QIXI_ALLOW_TEST_SELECTION_MODES=1
   QIXI_ORACLE_ENABLE_POLICY_ONLY=1
 )
 

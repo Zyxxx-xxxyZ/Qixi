@@ -17,14 +17,16 @@ Implemented for both backends:
 
 Search threads are fixed to **1**.
 
-### Official backend = upstream lightvector/KataGo only
+### Official backend
 
-Upstream KataGo has **no** persistent MCTS. Use branch `official/lightvector-master`
-(from `https://github.com/lightvector/KataGo`). Do not treat fork persistence as
-official. The harness uses stock `setPosition` + `runWholeSearch` (`numSearchThreads=1`).
+- **Default (no `--policy-only`)**: upstream `Search` + PUCT via `setPosition` /
+  `runWholeSearch` (`numSearchThreads=1`). Upstream has **no** persistent MCTS.
+- **Test-only (`--policy-only`)**: official engine switches to
+  `testNnPolicyOnly` — a **fresh** `MCTSStore` rebuilt each `setRootPly`, same
+  NN-policy sampler as custom. This path is **not** used in the app. Full list of
+  remaining custom vs official gaps: `docs/oracle-test-discrepancies.md`.
 
-Custom persistence correctness is the min-root-depth visit criterion — see
-`docs/correctness-persistent-mcts.md`. Visit-budget matching alone is not sufficiency.
+Custom persistence correctness: `docs/correctness-persistent-mcts.md`.
 
 ## Correctness protocol
 
