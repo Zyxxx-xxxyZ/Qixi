@@ -3,6 +3,18 @@
 Qixi is intended to be a serious local Go analysis app, not a demo. Please keep
 changes small enough to review, and attach evidence for every behavior you touch.
 
+## Local version control
+
+Git is the source of truth for rollback. Named checkpoints, a local bare mirror,
+and file-level restore commands are documented in
+`docs/local-version-control.md`. Day-to-day helper:
+
+```sh
+scripts/qixi-local-vcs.sh status
+scripts/qixi-local-vcs.sh history path/to/file
+scripts/qixi-local-vcs.sh restore path/to/file checkpoint/<name>
+```
+
 Before opening a pull request, read `docs/pr-verification-matrix.md`, identify
 every changed surface, and run the union of required gates. Every pull request
 starts with:

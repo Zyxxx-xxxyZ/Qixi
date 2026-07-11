@@ -10,6 +10,17 @@ end and KataGo analysis. The current workspace contains:
   for the fully in-process path when those artifacts are supplied.
 - `KataGo`: the local KataGo engine checkout and modifications.
 
+## Local version control
+
+Git history plus a local bare mirror let you restore any tracked file at any
+recorded revision. See `docs/local-version-control.md` and:
+
+```sh
+scripts/qixi-local-vcs.sh status
+scripts/qixi-local-vcs.sh history path/to/file
+scripts/qixi-local-vcs.sh restore path/to/file checkpoint/<name>
+```
+
 ## Quality Gate
 
 Run the default deterministic checks:
