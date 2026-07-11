@@ -114,19 +114,44 @@ If the engine only checks “already expanded?”, then:
 The min-depth rule is the precise inheritance/isolation switch for *visit
 labeling*, complementary to parent-local action isolation for *statistics*.
 
-## Layer C — Equivalence to official Search (open)
+## Layer C — Equivalence testing and selection contamination
 
-Still open and **not** claimed:
+### Why matching root visit counts alone is not enough
+
+After a node has been visited, **PUCT successor selection** depends on prior
+edge visits and Q-values along that path. Persistent search therefore walks
+**different** subtrees than a fresh (non-persistent) search even when both are
+given the same root visit budget: the persistent tree typically carries far more
+subtree visits from earlier roots. Those runs are not comparable as oracles.
+
+### Test-only selection mode: NN policy only
+
+For rigorous A/B tests, both engines under comparison must select successors
+from the **stored neural-network policy distribution alone** (no visit/Q term).
+
+| Property | Requirement |
+| --- | --- |
+| Mode name | `TreeSelectionMode::testNnPolicyOnly` |
+| Default / production | Always `TreeSelectionMode::puct` |
+| Compile gate | Core must be built with `-DQIXI_ALLOW_TEST_SELECTION_MODES=1` |
+| Runtime gate | `setTreeSelectionMode(..., kTestSelectionModeAllowToken)` |
+| Production library (`qixi_core`) | Built with `QIXI_ALLOW_TEST_SELECTION_MODES=0` — enable **fails closed** |
+| Test library (`qixi_core_testing`) | Built with `=1` — enable allowed **only** with the token |
+| App / default runtime | Must link `qixi_core`, never `qixi_core_testing` |
+
+This mode is **intentionally incorrect** for real strength; it exists solely so
+selection trajectories are independent of historical MCTS traffic.
+
+### Still open: value equivalence to upstream Search
+
+Even with policy-only selection,
 
 \[
 S_R^{\text{custom}} \stackrel{?}{=} S_R^{\text{official ordinary MCTS}}
 \]
 
-under the same model, rules, komi, noise, seed policy, and
-\(own(R)+inherited(R)\) sample counts.
-
-Official here means **upstream lightvector/KataGo Search**, not a forked
-persistent layer.
+under the same model, rules, komi, noise, seed, and sample counts remains an
+open claim. Official means **upstream lightvector/KataGo Search**, not a fork.
 
 ## Implementation map (`core/`)
 

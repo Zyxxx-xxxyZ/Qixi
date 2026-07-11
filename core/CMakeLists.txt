@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(qixi_core
+set(QIXI_CORE_SOURCES
   src/core_types.cpp
   src/board.cpp
   src/mcts.cpp
@@ -14,7 +14,16 @@ add_library(qixi_core
   src/analysis_api_custom.cpp
 )
 
+# Production core: test selection modes are compile-time disabled.
+add_library(qixi_core ${QIXI_CORE_SOURCES})
 target_include_directories(qixi_core PUBLIC include)
+target_compile_definitions(qixi_core PUBLIC QIXI_ALLOW_TEST_SELECTION_MODES=0)
+
+# Test-only core: same code with test selection modes permitted. Link this
+# ONLY from correctness / unit-test binaries — never from the app.
+add_library(qixi_core_testing ${QIXI_CORE_SOURCES})
+target_include_directories(qixi_core_testing PUBLIC include)
+target_compile_definitions(qixi_core_testing PUBLIC QIXI_ALLOW_TEST_SELECTION_MODES=1)
 
 add_executable(qixi_core_smoke
   tests/qixi_core_smoke.cpp
@@ -58,6 +67,20 @@ add_executable(qixi_split_backup
 
 target_link_libraries(qixi_split_backup PRIVATE qixi_core)
 
+add_executable(qixi_policy_only_selection
+  tests/qixi_policy_only_selection.cpp
+)
+
+# Must link the testing core so the mode can be enabled.
+target_link_libraries(qixi_policy_only_selection PRIVATE qixi_core_testing)
+
+add_executable(qixi_policy_only_selection_prod_guard
+  tests/qixi_policy_only_selection_prod_guard.cpp
+)
+
+# Production core must refuse to enable the test mode.
+target_link_libraries(qixi_policy_only_selection_prod_guard PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
@@ -66,3 +89,5 @@ add_test(NAME qixi_oracle_scaffold COMMAND qixi_oracle_scaffold)
 add_test(NAME qixi_analysis_api_smoke COMMAND qixi_analysis_api_smoke)
 add_test(NAME qixi_min_root_depth_visits COMMAND qixi_min_root_depth_visits)
 add_test(NAME qixi_split_backup COMMAND qixi_split_backup)
+add_test(NAME qixi_policy_only_selection COMMAND qixi_policy_only_selection)
+add_test(NAME qixi_policy_only_selection_prod_guard COMMAND qixi_policy_only_selection_prod_guard)

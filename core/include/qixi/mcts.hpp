@@ -99,6 +99,16 @@ struct SearchParams {
   uint64_t seed = 0x517869ULL;
 };
 
+// Tree action selection. Production always uses `puct`.
+// `testNnPolicyOnly` ignores visit counts / Q and samples successors from the
+// stored NN policy alone. It is intentionally incorrect for real play and is
+// available only when the translation unit is compiled with
+// QIXI_ALLOW_TEST_SELECTION_MODES=1 (test binaries only).
+enum class TreeSelectionMode : uint8_t {
+  puct = 0,
+  testNnPolicyOnly = 1,
+};
+
 struct CandidateSnapshot {
   Move move = kMovePass;
   uint64_t visits = 0;
@@ -191,6 +201,19 @@ public:
   void assignImportedGameId(GameId gameId);
   void setEvaluator(Evaluator* evaluator);
 
+  // Production default is always TreeSelectionMode::puct.
+  TreeSelectionMode treeSelectionMode() const { return treeSelectionMode_; }
+  // Enables test-only policy selection. Fails closed unless this core library
+  // was built with -DQIXI_ALLOW_TEST_SELECTION_MODES=1. Even then, callers must
+  // pass the explicit allow token (see kTestSelectionModeAllowToken).
+  bool setTreeSelectionMode(
+    TreeSelectionMode mode,
+    uint64_t allowToken,
+    std::string* error
+  );
+  // Token required as a second line of defense against accidental activation.
+  static constexpr uint64_t kTestSelectionModeAllowToken = 0x51584d4354535445ULL; // "QXMCTSTE"
+
   std::array<bool, kMoveCount> legalMoveMask() const;
   PlayMoveCommit playMoveFromRoot(Move move);
   bool switchRoot(NodeId node, std::string* error);
@@ -259,6 +282,7 @@ private:
   uint64_t playoutSeq = 0;
   uint64_t rootSessionSeq = 0;
   Evaluator* evaluator = nullptr;
+  TreeSelectionMode treeSelectionMode_ = TreeSelectionMode::puct;
 
   static uint64_t childKey(NodeId parent, Move move);
   static uint64_t initialLineageHash(const BoardState& board);
@@ -274,6 +298,7 @@ private:
   void markVisitedByCurrentRoot(NodeId node);
   bool selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf);
   ActionId selectAction(NodeId parent, bool isRoot);
+  ActionId selectActionByNnPolicyOnly(NodeId parent);
   float scoreAction(const Node& parent, Move move, float prior, const Action* action, bool isRoot) const;
   float policyPrior(const Node& parent, Move move) const;
   float valueForSelection(const ScalarStats& stats, Color pla) const;

@@ -10,7 +10,7 @@ set(QIXI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." CACHE PATH "Qixi repository ro
 set(KATAGO_CPP "${QIXI_ROOT}/KataGo/cpp" CACHE PATH "KataGo cpp directory")
 set(KATAGO_CORE_LIB "/private/tmp/qixi_katago_eigen/libkatago_core.a" CACHE FILEPATH "libkatago_core.a with Eigen backend")
 
-# qixi_core
+# qixi_core (+ testing variant for policy-only selection in this harness only)
 add_subdirectory("${QIXI_ROOT}/core" qixi_core_build)
 
 add_executable(qixi_oracle_correctness
@@ -27,6 +27,9 @@ target_include_directories(qixi_oracle_correctness PRIVATE
 
 target_compile_definitions(qixi_oracle_correctness PRIVATE
   USE_EIGEN_BACKEND
+  # Harness is allowed to request test selection mode; the mode still requires
+  # linking qixi_core_testing and the allow token at runtime.
+  QIXI_ORACLE_ENABLE_POLICY_ONLY=1
 )
 
 # ARM Apple Clang needs -fsigned-char like KataGo.
@@ -39,7 +42,9 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 target_link_libraries(qixi_oracle_correctness PRIVATE
-  qixi_core
+  # Testing core: required so enableTestNnPolicyOnlySelection can succeed.
+  # Do not link this library into the iOS app.
+  qixi_core_testing
   "${KATAGO_CORE_LIB}"
   Eigen3::Eigen
   ZLIB::ZLIB

@@ -88,6 +88,22 @@ public:
 
   // Root winrate, score lead (points), and best move.
   virtual RootObservation observeRoot() const = 0;
+
+  // TEST-ONLY: select tree successors from the NN policy distribution alone
+  // (ignore visit-dependent PUCT). Default implementation fails closed.
+  // Active only when the linked core was built with
+  // -DQIXI_ALLOW_TEST_SELECTION_MODES=1 and the allow token is correct.
+  virtual bool enableTestNnPolicyOnlySelection(uint64_t allowToken, std::string* error) {
+    if(error) {
+      *error = "testNnPolicyOnly selection is not supported by this engine";
+    }
+    (void)allowToken;
+    return false;
+  }
+
+  virtual bool testNnPolicyOnlySelectionEnabled() const {
+    return false;
+  }
 };
 
 // Factory for the modified/custom persistent MCTS backend.

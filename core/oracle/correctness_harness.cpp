@@ -53,6 +53,10 @@ size_t gMinStartMove = 50; // inclusive, 1-based move number in SGF line
 size_t gSequenceLen = 32;
 uint64_t gAdditionalAnalyses = 128;
 constexpr uint64_t kMasterSeed = 0x514958494f52434cULL; // "QIXIORCL"
+// When true (default for this harness), custom selection is NN-policy-only so
+// historical subtree visits cannot contaminate trajectories. Requires
+// qixi_core_testing. Official Search still uses its native selector (documented).
+bool gUseTestNnPolicyOnly = true;
 
 struct StepRecord {
   size_t step = 0;
@@ -268,9 +272,30 @@ bool runOneGame(
     record.error = std::string("custom loadLine: ") + err;
     return false;
   }
+  if(gUseTestNnPolicyOnly) {
+    if(!custom.enableTestNnPolicyOnlySelection(core::MCTSStore::kTestSelectionModeAllowToken, &err)) {
+      record.error = std::string("custom enableTestNnPolicyOnlySelection: ") + err;
+      return false;
+    }
+    if(!custom.testNnPolicyOnlySelectionEnabled()) {
+      record.error = "custom testNnPolicyOnly selection failed to activate";
+      return false;
+    }
+  }
   if(!official.loadLine(line, &err)) {
     record.error = std::string("official loadLine: ") + err;
     return false;
+  }
+  if(gUseTestNnPolicyOnly) {
+    // Official upstream Search has no policy-only tree selector; attempt fails closed.
+    std::string offErr;
+    if(official.enableTestNnPolicyOnlySelection(core::MCTSStore::kTestSelectionModeAllowToken, &offErr)) {
+      // If a future official wrapper supports it, require it to be active.
+      if(!official.testNnPolicyOnlySelectionEnabled()) {
+        record.error = "official claimed policy-only enable but mode inactive";
+        return false;
+      }
+    }
   }
 
   log << "game " << sgfPath.filename().string()
@@ -435,10 +460,17 @@ int main(int argc, char** argv) {
       gSequenceLen = static_cast<size_t>(std::stoull(need("--sequence-len")));
     else if(arg == "--additional")
       gAdditionalAnalyses = std::stoull(need("--additional"));
+    else if(arg == "--policy-only")
+      gUseTestNnPolicyOnly = true;
+    else if(arg == "--no-policy-only")
+      gUseTestNnPolicyOnly = false;
     else if(arg == "--help") {
       std::cout << "Usage: qixi_oracle_correctness --model PATH --sgfs DIR "
                    "[--seed N] [--num-games 8] [--window-moves 20] "
-                   "[--sequence-len 32] [--additional 128]\n";
+                   "[--sequence-len 32] [--additional 128] "
+                   "[--policy-only|--no-policy-only]\n"
+                   "  --policy-only (default): custom engine selects by NN prior only "
+                   "(test mode; requires qixi_core_testing).\n";
       return 0;
     }
   }
@@ -454,6 +486,12 @@ int main(int argc, char** argv) {
   tee("model=" + modelPath + "\n");
   tee("sgfs=" + sgfDir + "\n");
   tee("seed=" + std::to_string(seed) + "\n");
+  tee(std::string("testNnPolicyOnly=") + (gUseTestNnPolicyOnly ? "true" : "false") + "\n");
+  if(gUseTestNnPolicyOnly) {
+    tee("NOTE: custom selection is NN-policy-only (visit-independent). "
+        "Official Search still uses native PUCT unless it implements the test mode; "
+        "root-visit matching alone remains insufficient for full equivalence.\n");
+  }
 
   std::string err;
   auto nnCtx = oracle::createHostNNContext(modelPath, &err);

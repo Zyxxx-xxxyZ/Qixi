@@ -359,6 +359,38 @@ void MCTSStore::setEvaluator(Evaluator* value) {
   evaluator = value;
 }
 
+bool MCTSStore::setTreeSelectionMode(
+  TreeSelectionMode mode,
+  uint64_t allowToken,
+  std::string* error
+) {
+  if(mode == TreeSelectionMode::puct) {
+    treeSelectionMode_ = TreeSelectionMode::puct;
+    return true;
+  }
+  if(mode != TreeSelectionMode::testNnPolicyOnly) {
+    if(error) *error = "unknown tree selection mode";
+    return false;
+  }
+#if !defined(QIXI_ALLOW_TEST_SELECTION_MODES) || !QIXI_ALLOW_TEST_SELECTION_MODES
+  if(error) {
+    *error =
+      "testNnPolicyOnly selection is disabled in this build "
+      "(requires -DQIXI_ALLOW_TEST_SELECTION_MODES=1)";
+  }
+  treeSelectionMode_ = TreeSelectionMode::puct;
+  return false;
+#else
+  if(allowToken != kTestSelectionModeAllowToken) {
+    if(error) *error = "refusing test selection mode without allow token";
+    treeSelectionMode_ = TreeSelectionMode::puct;
+    return false;
+  }
+  treeSelectionMode_ = TreeSelectionMode::testNnPolicyOnly;
+  return true;
+#endif
+}
+
 uint64_t MCTSStore::childKey(NodeId parent, Move move) {
   return (static_cast<uint64_t>(parent) << 32) | static_cast<uint64_t>(move);
 }
@@ -739,7 +771,63 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
   }
 }
 
+ActionId MCTSStore::selectActionByNnPolicyOnly(NodeId parentId) {
+  // TEST-ONLY path: sample a legal child proportional to the stored NN prior.
+  // Visit counts, Q-values, FPU, and root noise are intentionally ignored so
+  // prior MCTS traffic through a node cannot bias successor choice.
+  const Node& parent = nodes[parentId];
+  if(parent.policyOffset == kInvalidNode ||
+     static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())
+    return kInvalidAction;
+
+  float priorSum = 0.0f;
+  for(Move move = 0; move < kMoveCount; ++move) {
+    const float prior = policyArena[parent.policyOffset + move];
+    if(prior > 0.0f)
+      priorSum += prior;
+  }
+  if(priorSum <= 0.0f)
+    return kInvalidAction;
+
+  // Deterministic unit draw from store seed, playout index, and parent id so
+  // two engines with the same NN priors and seed follow the same trajectory
+  // regardless of visit statistics.
+  const uint64_t keyValue = params.seed ^
+    (playoutSeq * 0x9e3779b97f4a7c15ULL) ^
+    (static_cast<uint64_t>(parentId) * 0xbf58476d1ce4e5b9ULL) ^
+    0x504f4c594f4e4c59ULL; // "POLYONLY"
+  const double u = deterministicUnit(keyValue) * static_cast<double>(priorSum);
+  double cumulative = 0.0;
+  Move chosen = kMovePass;
+  bool found = false;
+  for(Move move = 0; move < kMoveCount; ++move) {
+    const float prior = policyArena[parent.policyOffset + move];
+    if(prior <= 0.0f)
+      continue;
+    cumulative += static_cast<double>(prior);
+    if(!found || u <= cumulative) {
+      chosen = move;
+      found = true;
+      if(u <= cumulative)
+        break;
+    }
+  }
+  if(!found)
+    return kInvalidAction;
+  return getOrCreateAction(parentId, chosen);
+}
+
 ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
+  if(treeSelectionMode_ == TreeSelectionMode::testNnPolicyOnly) {
+#if !defined(QIXI_ALLOW_TEST_SELECTION_MODES) || !QIXI_ALLOW_TEST_SELECTION_MODES
+    // Defense in depth: even if the enum were corrupted, never run the test
+    // selector in production builds.
+    treeSelectionMode_ = TreeSelectionMode::puct;
+#else
+    return selectActionByNnPolicyOnly(parentId);
+#endif
+  }
+
   const Node& parent = nodes[parentId];
   if(parent.policyOffset == kInvalidNode ||
      static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())

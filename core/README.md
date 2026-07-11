@@ -55,6 +55,9 @@ Correctness scope:
   **no** persistence; fork-only persistence is not "official."
 - Persist version 4 writes min-depth + stored NN fields.
 - Dual analysis API + host oracle: `include/qixi/analysis_api.hpp`, `core/oracle/`.
+- Libraries: `qixi_core` (production, test selection modes disabled) and
+  `qixi_core_testing` (correctness binaries only; may enable
+  `TreeSelectionMode::testNnPolicyOnly` with the allow token).
 
 Build:
 

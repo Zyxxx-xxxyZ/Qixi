@@ -165,6 +165,23 @@ public:
     return obs;
   }
 
+  bool enableTestNnPolicyOnlySelection(uint64_t allowToken, std::string* error) override {
+    if(!store_) {
+      if(error) *error = "no line loaded";
+      return false;
+    }
+    return store_->setTreeSelectionMode(
+      core::TreeSelectionMode::testNnPolicyOnly,
+      allowToken,
+      error
+    );
+  }
+
+  bool testNnPolicyOnlySelectionEnabled() const override {
+    return store_ &&
+      store_->treeSelectionMode() == core::TreeSelectionMode::testNnPolicyOnly;
+  }
+
 private:
   core::Evaluator* evaluator_ = nullptr;
   GameLine line_{};
