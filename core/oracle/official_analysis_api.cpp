@@ -68,8 +68,7 @@ public:
       "qixi-official-oracle"
     );
     search_->setAlwaysIncludeOwnerMap(true);
-    // Keep stock official Search (persistent MCTS left OFF — see header note).
-    search_->setPersistentMCTSEnabled(false);
+    // Official lightvector/KataGo has no persistent-MCTS API.
   }
 
   const char* name() const override {

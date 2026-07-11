@@ -67,7 +67,8 @@ void testSparseMemoryLayout() {
   assert(memory.policyFloatCount % kMoveCount == 0);
   assert(memory.policyFloatCount <= memory.nodeCount * kMoveCount);
   assert(memory.ownershipFloatCount % kOwnershipDim == 0);
-  assert(memory.ownershipFloatCount <= memory.nodeCount * kOwnershipDim);
+  // Up to two ownership blocks per node: raw NN leaf + aggregated MCTS mean.
+  assert(memory.ownershipFloatCount <= memory.nodeCount * kOwnershipDim * 2);
   assert(memory.estimatedArenaBytes < 16ULL * 1024ULL * 1024ULL);
 }
 

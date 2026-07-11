@@ -46,18 +46,15 @@ Integration boundaries:
 
 Correctness scope:
 
-- The tests establish the persistent-store isolation invariants implemented here. This
-  search policy is not yet a byte-for-byte reproduction of every official KataGo search
-  heuristic, RNG draw, score-utility update, or ruleset encore/dead-stone behavior.
-- Store serialization currently builds a complete byte vector before atomic file write.
-  It avoids duplicate trees and transient store cloning, but is not a streaming encoder.
-- `qixi_oracle_scaffold` locks custom-core deterministic baselines and the
-  `OracleRootReport` comparison shape (`oracle_compare.hpp`) for the first fixed-root
-  case under a UniformEvaluator.
-- Dual backend analysis API: `include/qixi/analysis_api.hpp` (root change, analysis
-  budget, root analysis count, winrate/score). Custom implementation in
-  `src/analysis_api_custom.cpp`. Official host wrapper + full 8-game SGF harness:
-  `core/oracle/` (see `core/oracle/README.md`).
+- Persistent visit semantics: see `docs/correctness-persistent-mcts.md`. For each node
+  store \(d_{\min}\) (shallowest root depth that visited it). Root \(R\) has visited
+  \(N\) iff \(N\) is in \(R\)'s subtree and \(d(R)\ge d_{\min}(N)\). NN output is stored
+  once per node; a root must not skip first-visit only because another root expanded \(N\).
+- Parent-local action isolation and history-sensitive identity remain required.
+- Search policy is **not** claimed equal to upstream lightvector/KataGo. Upstream has
+  **no** persistence; fork-only persistence is not "official."
+- Persist version 4 writes min-depth + stored NN fields.
+- Dual analysis API + host oracle: `include/qixi/analysis_api.hpp`, `core/oracle/`.
 
 Build:
 

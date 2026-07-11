@@ -17,27 +17,32 @@ Implemented for both backends:
 
 Search threads are fixed to **1**.
 
-### Official-backend note (no Search.cpp patches)
+### Official backend = upstream lightvector/KataGo only
 
-An attempt to drive official Search with `setPersistentMCTSEnabled(true)` +
-`setPositionForMCTSPersistence` hit a fatal `testAssert(isRoot)` inside stock
-`search.cpp` during multi-root transfers (zero-weight non-root node). Per policy
-we **did not modify** official Search sources. The official backend uses stock
-`setPosition` for root changes (fresh tree per root) and matches the custom
-backend’s reported total analysis count via `maxVisits` / `maxPlayouts`.
+Upstream KataGo has **no** persistent MCTS. Use branch `official/lightvector-master`
+(from `https://github.com/lightvector/KataGo`). Do not treat fork persistence as
+official. The harness uses stock `setPosition` + `runWholeSearch` (`numSearchThreads=1`).
+
+Custom persistence correctness is the min-root-depth visit criterion — see
+`docs/correctness-persistent-mcts.md`. Visit-budget matching alone is not sufficiency.
 
 ## Correctness protocol
 
 Executable: `qixi_oracle_correctness`
 
 ```sh
-# Build KataGo Eigen once
-cmake -S KataGo/cpp -B /private/tmp/qixi_katago_eigen \
+# Build official KataGo Eigen (submodule on official/lightvector-master)
+cmake -S KataGo/cpp -B /private/tmp/qixi_katago_official_eigen \
   -DUSE_BACKEND=EIGEN -DUSE_AVX2=0 -DNO_GIT_REVISION=1 -DCMAKE_BUILD_TYPE=Release
-cmake --build /private/tmp/qixi_katago_eigen --target katago_core --parallel
+cmake --build /private/tmp/qixi_katago_official_eigen --target katago --parallel
+# Archive non-main objects for linking (upstream has no libkatago_core.a)
+( cd /private/tmp/qixi_katago_official_eigen && \
+  find . -name '*.o' ! -path './CMakeFiles/katago.dir/main.cpp.o' -print0 \
+  | xargs -0 ar rcs libkatago_official.a )
 
 # Build harness
-cmake -S core/oracle -B /private/tmp/qixi_oracle_build -DCMAKE_BUILD_TYPE=Release
+cmake -S core/oracle -B /private/tmp/qixi_oracle_build -DCMAKE_BUILD_TYPE=Release \
+  -DKATAGO_CORE_LIB=/private/tmp/qixi_katago_official_eigen/libkatago_official.a
 cmake --build /private/tmp/qixi_oracle_build --parallel
 
 # Full protocol (defaults: 8 games, window 20, seq 32, +128)

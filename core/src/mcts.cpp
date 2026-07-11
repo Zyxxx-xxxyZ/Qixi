@@ -579,6 +579,83 @@ ActionId MCTSStore::getOrCreateAction(NodeId parent, Move move) {
   return id;
 }
 
+bool MCTSStore::storeNNOutput(NodeId nodeId, const LeafPayload& leaf) {
+  if(nodeId >= nodes.size() || !validLeafPayload(leaf))
+    return false;
+  Node& node = nodes[nodeId];
+  if(node.hasStoredNN)
+    return true;
+  node.hasStoredNN = true;
+  node.nnWinLossWhite = leaf.winLossWhite;
+  node.nnNoResult = leaf.noResult;
+  node.nnScoreMeanWhite = leaf.scoreMeanWhite;
+  node.nnScoreMeanSqWhite = leaf.scoreMeanSqWhite;
+  node.nnLeadWhite = leaf.leadWhite;
+  node.nnUtilityWhite = leaf.utilityWhite;
+  node.nnWeight = leaf.weight;
+  node.nnOwnershipOffset = static_cast<uint32_t>(ownershipArena.size());
+  ownershipArena.resize(ownershipArena.size() + kOwnershipDim, 0.0f);
+  std::copy(leaf.ownership.begin(), leaf.ownership.end(), ownershipArena.begin() + node.nnOwnershipOffset);
+  return true;
+}
+
+bool MCTSStore::loadStoredNNOutput(NodeId nodeId, LeafPayload& leaf) const {
+  if(nodeId >= nodes.size())
+    return false;
+  const Node& node = nodes[nodeId];
+  if(!node.hasStoredNN ||
+     node.policyOffset == kInvalidNode ||
+     static_cast<uint64_t>(node.policyOffset) + kMoveCount > policyArena.size() ||
+     node.nnOwnershipOffset == kInvalidNode ||
+     static_cast<uint64_t>(node.nnOwnershipOffset) + kOwnershipDim > ownershipArena.size())
+    return false;
+  leaf = LeafPayload{};
+  leaf.winLossWhite = node.nnWinLossWhite;
+  leaf.noResult = node.nnNoResult;
+  leaf.scoreMeanWhite = node.nnScoreMeanWhite;
+  leaf.scoreMeanSqWhite = node.nnScoreMeanSqWhite;
+  leaf.leadWhite = node.nnLeadWhite;
+  leaf.utilityWhite = node.nnUtilityWhite;
+  leaf.weight = node.nnWeight;
+  std::copy(
+    policyArena.begin() + node.policyOffset,
+    policyArena.begin() + node.policyOffset + kMoveCount,
+    leaf.policy.begin()
+  );
+  std::copy(
+    ownershipArena.begin() + node.nnOwnershipOffset,
+    ownershipArena.begin() + node.nnOwnershipOffset + kOwnershipDim,
+    leaf.ownership.begin()
+  );
+  return true;
+}
+
+void MCTSStore::markVisitedByCurrentRoot(NodeId nodeId) {
+  if(nodeId >= nodes.size() || root >= nodes.size())
+    return;
+  if(!isAncestorOrSelf(root, nodeId))
+    return;
+  const uint32_t rootDepth = nodes[root].ply;
+  Node& node = nodes[nodeId];
+  if(node.minVisitedRootDepth > rootDepth)
+    node.minVisitedRootDepth = rootDepth;
+}
+
+bool MCTSStore::isInCurrentRootSubtree(NodeId node) const {
+  if(root >= nodes.size() || node >= nodes.size())
+    return false;
+  return isAncestorOrSelf(root, node);
+}
+
+bool MCTSStore::rootHasVisitedNode(NodeId node) const {
+  if(!isInCurrentRootSubtree(node))
+    return false;
+  if(root >= nodes.size() || node >= nodes.size())
+    return false;
+  // Root R has visited N iff depth(R) >= shallowest root-depth that visited N.
+  return nodes[root].ply >= nodes[node].minVisitedRootDepth;
+}
+
 bool MCTSStore::expandNode(NodeId nodeId, const LeafPayload& leaf, const std::array<bool, kMoveCount>& legalMask) {
   if(nodeId >= nodes.size())
     return false;
@@ -598,6 +675,8 @@ bool MCTSStore::expandNode(NodeId nodeId, const LeafPayload& leaf, const std::ar
   }
   if(legalCount <= 0) {
     node.state = NodeState::terminal;
+    if(!storeNNOutput(nodeId, leaf))
+      return false;
     return true;
   }
 
@@ -610,6 +689,11 @@ bool MCTSStore::expandNode(NodeId nodeId, const LeafPayload& leaf, const std::ar
       ? std::max(0.0f, leaf.policy[i]) / sum
       : 1.0f / static_cast<float>(legalCount);
   }
+  // Store raw NN leaf once. Subsequent roots reuse this payload instead of
+  // treating the node as a brand-new unevaluated leaf solely because another
+  // root expanded it earlier.
+  if(!storeNNOutput(nodeId, leaf))
+    return false;
   node.state = NodeState::expanded;
   return true;
 }
@@ -627,7 +711,11 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
       leaf = current;
       return true;
     }
-    if(node.state != NodeState::expanded) {
+    // First-visit barrier for the *current root*:
+    // even if the node is already expanded (NN stored under another root), a
+    // root that has not yet visited it must stop here and perform exactly one
+    // first visit under this root (using stored NN when available).
+    if(node.state != NodeState::expanded || !rootHasVisitedNode(current)) {
       leaf = current;
       return true;
     }
@@ -738,7 +826,12 @@ float MCTSStore::valueForSelection(const ScalarStats& stats, Color pla) const {
   return white;
 }
 
-bool MCTSStore::evaluateLeaf(const ThreadState& state, bool isRoot, LeafPayload& leaf) {
+bool MCTSStore::evaluateLeaf(
+  const ThreadState& state,
+  NodeId leafNode,
+  bool isRoot,
+  LeafPayload& leaf
+) {
   if(terminalByPasses(state.board)) {
     leaf = LeafPayload{};
     const float score = whiteScoreLead(state.board, storeRules);
@@ -758,6 +851,10 @@ bool MCTSStore::evaluateLeaf(const ThreadState& state, bool isRoot, LeafPayload&
     }
     return true;
   }
+  // Prefer the once-stored NN output so a later root does not re-query the net
+  // for a node that was already expanded under a different root.
+  if(loadStoredNNOutput(leafNode, leaf))
+    return true;
   if(!evaluator)
     return false;
   return evaluator->evaluate(state.board, storeRules, isRoot, leaf);
@@ -766,7 +863,7 @@ bool MCTSStore::evaluateLeaf(const ThreadState& state, bool isRoot, LeafPayload&
 bool MCTSStore::runPlayout() {
   if(root >= nodes.size())
     return false;
-  if(nodes[root].state == NodeState::terminal && nodes[root].visits > 0)
+  if(nodes[root].state == NodeState::terminal && rootHasVisitedNode(root) && nodes[root].visits > 0)
     return false;
   ThreadState state{rootBoardState};
   Path path;
@@ -774,16 +871,32 @@ bool MCTSStore::runPlayout() {
   if(!selectPathToLeaf(state, path, leafNode))
     return false;
 
+  // Exactly-once visit under the current root: never re-enter a node this root
+  // has already visited as a first-visit leaf.
+  if(rootHasVisitedNode(leafNode) && nodes[leafNode].state == NodeState::expanded) {
+    // Path selection should not stop on an already-visited expanded node; if it
+    // did, selection is stuck (no legal continuation).
+    return false;
+  }
+
   LeafPayload leaf;
-  if(!evaluateLeaf(state, path.nodes.size() == 1, leaf))
+  if(!evaluateLeaf(state, leafNode, path.nodes.size() == 1, leaf))
     return false;
   if(!validLeafPayload(leaf))
     return false;
 
   if(nodes[leafNode].state == NodeState::unexpanded) {
     const auto legal = BoardLogic::legalMoveMask(state.board, storeRules);
-    expandNode(leafNode, leaf, legal);
+    if(!expandNode(leafNode, leaf, legal))
+      return false;
+  } else if(!nodes[leafNode].hasStoredNN) {
+    // Expanded without stored NN should not happen under v4 semantics; repair.
+    if(!storeNNOutput(leafNode, leaf))
+      return false;
   }
+
+  // Label this leaf as visited by the active root (updates minVisitedRootDepth).
+  markVisitedByCurrentRoot(leafNode);
   backup(path, leaf);
   playoutSeq += 1;
   return true;
@@ -1332,6 +1445,20 @@ bool MCTSStore::validate(std::string* error) const {
       }
       usedOwnershipBlocks[node.ownershipOffset / kOwnershipDim] = 1;
     }
+    // Raw NN ownership is a separate owned block (v4).
+    if(node.hasStoredNN) {
+      if(node.nnOwnershipOffset == kInvalidNode ||
+         node.nnOwnershipOffset % kOwnershipDim != 0 ||
+         static_cast<uint64_t>(node.nnOwnershipOffset) + kOwnershipDim > ownershipArena.size() ||
+         usedOwnershipBlocks[node.nnOwnershipOffset / kOwnershipDim]) {
+        if(error) *error = "stored NN ownership range is invalid or aliased";
+        return false;
+      }
+      usedOwnershipBlocks[node.nnOwnershipOffset / kOwnershipDim] = 1;
+    } else if(node.nnOwnershipOffset != kInvalidNode) {
+      if(error) *error = "node without stored NN unexpectedly owns nnOwnership";
+      return false;
+    }
     if(visible[i]) {
       if(!seenVisibleLineages.emplace(node.lineageHash, i).second) {
         if(error) *error = "visible record contains duplicate lineage hashes";
@@ -1396,7 +1523,7 @@ std::vector<uint8_t> MCTSStore::serialize() const {
     static_cast<uint64_t>(initialBoardState.boardHashHistory.size()) * 8ULL +
     static_cast<uint64_t>(initialBoardState.situationHashHistory.size()) * 8ULL +
     static_cast<uint64_t>(initialBoardState.moves.size()) * 15ULL +
-    static_cast<uint64_t>(nodes.size()) * 89ULL +
+    static_cast<uint64_t>(nodes.size()) * 126ULL +
     static_cast<uint64_t>(actions.size()) * 58ULL +
     static_cast<uint64_t>(policyArena.size()) * sizeof(float) +
     static_cast<uint64_t>(ownershipArena.size()) * sizeof(float) +
@@ -1496,6 +1623,17 @@ std::vector<uint8_t> MCTSStore::serialize() const {
     writeStats(node.stats);
     w.writeU32(node.ownershipOffset);
     w.writeU64(node.lineageHash);
+    // v4 persistent-visit + stored NN fields
+    w.writeU32(node.minVisitedRootDepth);
+    w.writeU8(node.hasStoredNN ? 1 : 0);
+    w.writeFloat(node.nnWinLossWhite);
+    w.writeFloat(node.nnNoResult);
+    w.writeFloat(node.nnScoreMeanWhite);
+    w.writeFloat(node.nnScoreMeanSqWhite);
+    w.writeFloat(node.nnLeadWhite);
+    w.writeFloat(node.nnUtilityWhite);
+    w.writeFloat(node.nnWeight);
+    w.writeU32(node.nnOwnershipOffset);
   }
   for(const Action& action : actions) {
     w.writeU32(action.parent);
@@ -1684,8 +1822,9 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
     if(error) *error = "truncated array counts";
     return std::nullopt;
   }
+  const uint32_t nodeRecordBytes = version >= 4 ? 126U : 89U;
   const __uint128_t minimumBytes =
-    static_cast<__uint128_t>(nodeCount) * 89U +
+    static_cast<__uint128_t>(nodeCount) * nodeRecordBytes +
     static_cast<__uint128_t>(actionCount) * 58U +
     static_cast<__uint128_t>(policyCount) * 4U +
     static_cast<__uint128_t>(ownershipCount) * 4U +
@@ -1746,6 +1885,30 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
     node.movePla = static_cast<Color>(movePla);
     node.nextPla = static_cast<Color>(pla);
     node.state = static_cast<NodeState>(state);
+    if(version >= 4) {
+      uint8_t hasNN = 0;
+      if(!r.readU32(node.minVisitedRootDepth) ||
+         !r.readU8(hasNN) || hasNN > 1 ||
+         !r.readFloat(node.nnWinLossWhite) ||
+         !r.readFloat(node.nnNoResult) ||
+         !r.readFloat(node.nnScoreMeanWhite) ||
+         !r.readFloat(node.nnScoreMeanSqWhite) ||
+         !r.readFloat(node.nnLeadWhite) ||
+         !r.readFloat(node.nnUtilityWhite) ||
+         !r.readFloat(node.nnWeight) ||
+         !r.readU32(node.nnOwnershipOffset)) {
+        if(error) *error = "truncated v4 node visit/NN fields";
+        return std::nullopt;
+      }
+      node.hasStoredNN = hasNN != 0;
+    } else {
+      // Legacy import approximation: expanded nodes are treated as visited by
+      // the initial root depth 0 and without a recoverable raw NN leaf.
+      node.minVisitedRootDepth =
+        (node.state == NodeState::expanded || node.visits > 0) ? 0u : kNeverVisitedRootDepth;
+      node.hasStoredNN = false;
+      node.nnOwnershipOffset = kInvalidNode;
+    }
   }
   for(Action& action : store.actions) {
     if(!r.readU32(action.parent) ||

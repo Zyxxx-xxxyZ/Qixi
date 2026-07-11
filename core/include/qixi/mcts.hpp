@@ -57,8 +57,26 @@ struct Node {
   uint32_t ancestorOffset = 0;
   VisitCount visits = 0;
   ScalarStats stats;
+  // Aggregated MCTS ownership mean (backup-weighted), not necessarily raw NN.
   uint32_t ownershipOffset = kInvalidNode;
   uint64_t lineageHash = 0;
+
+  // Persistent visit labeling (see docs/correctness-persistent-mcts.md):
+  // shallowest depth of any root that has visited this node while acting as root.
+  // Root R (depth d_R) has visited N iff N is in R's subtree and d_R >= minVisitedRootDepth.
+  uint32_t minVisitedRootDepth = kNeverVisitedRootDepth;
+
+  // Raw neural-network leaf stored once on first expansion (required for reuse
+  // when a shallower root later visits a node first-expanded under a deeper root).
+  bool hasStoredNN = false;
+  float nnWinLossWhite = 0.0f;
+  float nnNoResult = 0.0f;
+  float nnScoreMeanWhite = 0.0f;
+  float nnScoreMeanSqWhite = 0.0f;
+  float nnLeadWhite = 0.0f;
+  float nnUtilityWhite = 0.0f;
+  float nnWeight = 1.0f;
+  uint32_t nnOwnershipOffset = kInvalidNode;
 };
 
 struct Action {
@@ -178,6 +196,10 @@ public:
   bool switchRoot(NodeId node, std::string* error);
   bool markVisible(NodeId node, bool value);
   bool isAncestorOrSelf(NodeId ancestor, NodeId node) const;
+  // True iff `node` lies in the current root's subtree (including the root).
+  bool isInCurrentRootSubtree(NodeId node) const;
+  // Min-depth visit predicate for the active root (requires subtree membership).
+  bool rootHasVisitedNode(NodeId node) const;
   std::optional<NodeId> findVisibleNodeByLineage(uint64_t lineageHash) const;
   bool runPlayout();
   void runPlayouts(uint32_t count);
@@ -234,12 +256,15 @@ private:
   ActionId findAction(NodeId parent, Move move) const;
   ActionId getOrCreateAction(NodeId parent, Move move);
   bool expandNode(NodeId node, const LeafPayload& leaf, const std::array<bool, kMoveCount>& legalMask);
+  bool storeNNOutput(NodeId node, const LeafPayload& leaf);
+  bool loadStoredNNOutput(NodeId node, LeafPayload& leaf) const;
+  void markVisitedByCurrentRoot(NodeId node);
   bool selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf);
   ActionId selectAction(NodeId parent, bool isRoot);
   float scoreAction(const Node& parent, Move move, float prior, const Action* action, bool isRoot) const;
   float policyPrior(const Node& parent, Move move) const;
   float valueForSelection(const ScalarStats& stats, Color pla) const;
-  bool evaluateLeaf(const ThreadState& state, bool isRoot, LeafPayload& leaf);
+  bool evaluateLeaf(const ThreadState& state, NodeId leafNode, bool isRoot, LeafPayload& leaf);
   void backup(const Path& path, const LeafPayload& leaf);
   void updateNodeStats(Node& node, const LeafPayload& leaf, float weight);
   void updateActionStats(Action& action, const LeafPayload& leaf, float weight);

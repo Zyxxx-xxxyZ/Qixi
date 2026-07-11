@@ -17,8 +17,11 @@ constexpr int kOwnershipDim = kBoardArea;
 constexpr uint32_t kInvalidNode = std::numeric_limits<uint32_t>::max();
 constexpr uint32_t kInvalidAction = std::numeric_limits<uint32_t>::max();
 constexpr uint32_t kSearchThreadCount = 1;
-constexpr uint32_t kPersistVersion = 3;
+// v4: per-node minVisitedRootDepth + stored raw NN leaf (persistent visit semantics).
+constexpr uint32_t kPersistVersion = 4;
 constexpr uint32_t kMinimumReadablePersistVersion = 2;
+// Sentinel: node has never been visited by any root under the min-depth criterion.
+constexpr uint32_t kNeverVisitedRootDepth = std::numeric_limits<uint32_t>::max();
 constexpr uint64_t kPersistMagic = 0x514958494D435453ULL; // "QIXIMCTS"
 
 using NodeId = uint32_t;

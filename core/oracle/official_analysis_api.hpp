@@ -8,10 +8,8 @@
 
 namespace qixi::oracle {
 
-// Official KataGo Search backend implementing the same AnalysisEngine API.
-// Uses existing Search APIs only (no Search.cpp edits):
-//   setPosition, runWholeSearch, getRootVisits, getRootValues, getAnalysisData.
-// Persistent-MCTS is intentionally OFF: root transfers via stock setPosition.
+// Official lightvector/KataGo Search backend (no persistence — upstream has none).
+// Root changes use stock setPosition; visit budgets via maxVisits/maxPlayouts.
 std::unique_ptr<analysis::AnalysisEngine> createOfficialAnalysisEngine(HostNNContext* ctx);
 
 } // namespace qixi::oracle
