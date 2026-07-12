@@ -96,7 +96,7 @@ enum QixiBackendTransition: Equatable {
 }
 
 @MainActor
-final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPressureHost, QixiPersistenceHost {
+final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPressureHost, QixiPersistenceHost, QixiUtilitySheetHost {
   private static let variationRootID = QixiVariationModel.rootID
   // Autosave interval / debounce live on QixiPersistenceCoordinator.
   // Analysis cache LRU cap lives on QixiAnalysisCache.
@@ -182,11 +182,10 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   private var analysisTask: Task<Void, Never>?
   private var analysisRefreshTask: Task<Void, Never>?
   private var engineTombstoneTask: Task<Void, Never>?
-  /// Manual sync only (product `syncNow`); autosave mirror lives on the coordinator.
-  private var syncTask: Task<Void, Never>?
   private var analysisGeneration = 0
   private var analysisCache = QixiAnalysisCache()
   private let persistence = QixiPersistenceCoordinator()
+  private let syncCoordinator = QixiSyncCoordinator()
   private var cachedBoardMoves: [BoardMove] = []
   private var bestCandidateWinrate: Double?
   private var cachedVisibleCandidates: [CandidateMove] = []
@@ -324,6 +323,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     )
     persistence.attach(host: self)
     persistence.startAutosaveTimer()
+    syncCoordinator.attach(host: self)
     if !wroteAutomationLifecycleTombstone {
       persistence.saveSoon(reason: "launchReady")
     }
@@ -346,15 +346,15 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
     engineTombstoneTask?.cancel()
-    syncTask?.cancel()
     if let memorySampler {
       Task { @MainActor in
         memorySampler.stop(reason: "deinit")
       }
     }
-    Task { @MainActor [memoryPressurePolicy, persistence] in
+    Task { @MainActor [memoryPressurePolicy, persistence, syncCoordinator] in
       memoryPressurePolicy.stop()
       persistence.stop()
+      syncCoordinator.stop()
     }
   }
 
@@ -1260,50 +1260,22 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   func syncNow() {
-    guard !isBackendInteractionBlocked else { return }
-    let wasSyncEnabled = iCloudSyncEnabled
-    let localSnapshot: QixiAppSnapshot?
-    do {
-      localSnapshot = try localSnapshotForManualSync()
-    } catch {
-      lastSaveError = String(describing: error)
-      syncStatus = QixiSyncStatus(
-        provider: syncStatus.provider,
-        lastSyncAt: syncStatus.lastSyncAt,
-        lastError: String(describing: error)
-      )
-      return
-    }
-    syncTask?.cancel()
-    syncTask = Task { [weak self] in
-      guard let self else { return }
-      do {
-        let result = try QixiSyncStore.reconcile(localSnapshot: localSnapshot)
-        if let imported = result.importedSnapshot {
-          apply(snapshot: imported)
-          resumeAnalysisForImportedSnapshotIfNeeded()
-        } else if localSnapshot == nil {
-          let initialSnapshot = currentSnapshot(reason: "manualSync")
-          try QixiSnapshotStore.save(initialSnapshot)
-          try QixiSyncStore.write(initialSnapshot)
-          lastSaveError = nil
-        }
-        try await mirrorVisibleMCTSStatePackageToICloudIfNeeded(
-          result: result,
-          reason: "manualSyncMCTSStatePackage"
-        )
-        noteSyncResult(result)
-      } catch {
-        if !wasSyncEnabled {
-          setICloudSyncEnabled(false)
-        }
-        syncStatus = QixiSyncStatus(
-          provider: syncStatus.provider,
-          lastSyncAt: syncStatus.lastSyncAt,
-          lastError: String(describing: error)
-        )
-      }
-    }
+    syncCoordinator.syncNow()
+  }
+
+  // MARK: - Feature hosts (utility sheets)
+
+  var mainLineCount: Int { mainLine.count }
+
+  func resumeAnalysisAfterImportedSnapshot() {
+    resumeAnalysisForImportedSnapshotIfNeeded()
+  }
+
+  func mirrorVisibleMCTSStatePackageAfterManualSync(result: QixiSyncResult) async throws {
+    try await mirrorVisibleMCTSStatePackageToICloudIfNeeded(
+      result: result,
+      reason: "manualSyncMCTSStatePackage"
+    )
   }
 
   func setLanguage(_ language: AppLanguage) {
@@ -2459,7 +2431,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     try persistence.localSnapshotForManualSync(isUntouchedDefault: isUntouchedLaunchDefaultState)
   }
 
-  private var isUntouchedLaunchDefaultState: Bool {
+  var isUntouchedLaunchDefaultState: Bool {
     selectedEngine == .none &&
       recognizedSetupStones == nil &&
       mainLine == Self.sampleLine &&
@@ -2511,7 +2483,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     ""
   }
 
-  private func setICloudSyncEnabled(_ enabled: Bool) {
+  func setICloudSyncEnabled(_ enabled: Bool) {
     iCloudSyncEnabled = enabled
     UserDefaults.standard.set(enabled, forKey: QixiPreferences.iCloudSyncEnabledKey)
   }

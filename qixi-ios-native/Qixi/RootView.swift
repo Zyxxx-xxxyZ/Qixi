@@ -52,7 +52,7 @@ struct RootView: View {
       .animation(.easeInOut(duration: 0.12), value: model.activeBlockingJob?.id)
     }
     .sheet(item: $model.utilitySheet) { sheet in
-      QixiUtilitySheetView(sheet: sheet, model: model)
+      QixiUtilitySheetView(sheet: sheet, host: model)
     }
   }
 }

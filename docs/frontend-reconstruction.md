@@ -42,15 +42,35 @@ Logic extracted into:
 | `QixiAnalysisCache` | Per-engine analysis map, LRU, memory-pressure trim |
 | `QixiPersistenceCoordinator` | Debounced save, periodic autosave, lifecycle tombstone policy |
 | `QixiMemoryPressurePolicy` | Soft/hard OOM unload triggers |
+| Feature hosts + sheets | Camera / Import / Sync UI modules (see below) |
+| `QixiSyncCoordinator` | Manual Sync Now (separate from autosave mirror) |
 
 ## Not yet done (next slices)
 
-- Further slimming: feature plugins (camera/SGF/sync UI modules).
+- ~~Further slimming: feature plugins (camera/SGF/sync UI modules)~~ **done** (see below).
 - ~~Incremental variation projection (diff apply)~~ **done** (see below).
 - ~~Analysis cache module + persistence coordinator~~ **done** (phase 2).
 - ~~Streaming deserialize / true byte-progress during parse~~ **done** (`deserializeFromFile` + progress; single-store import path).
 - ~~OOM unload policy wired to memory pressure~~ **done** (see below).
 - ~~Delete dual HTTP analysis path from product session~~ **done** (factory + ViewModel core-only; HTTP sources excluded from app target).
+
+Reconstruction foundation slices for frontend are complete; optional later work includes
+moving MCTS package builders off the ViewModel and deeper analysis/engine feature splits.
+
+## Feature plugins (landed)
+
+Utility UI is split by domain with thin host protocols:
+
+| Module | Host protocol | Role |
+| --- | --- | --- |
+| `QixiCameraSheets.swift` | `QixiBoardRecognitionHost` | Camera/crop/recognize UI |
+| `QixiImportSheets.swift` | `QixiImportSheetHost` (SGF + MCTS package) | Import/export package + SGF |
+| `QixiSyncSheets.swift` | `QixiSyncFeatureHost` | Sync status + Sync Now |
+| `QixiImportFileAccess.swift` | — | Security-scoped / coordinated file copy |
+| `QixiSyncCoordinator.swift` | `QixiSyncFeatureHost` | Manual `syncNow` body |
+| `QixiUtilitySheets.swift` | `QixiUtilitySheetHost` | Thin router |
+
+Board apply / SGF import / MCTS package mutations remain on `QixiViewModel` (host).
 
 ## Incremental variation projection (landed)
 
