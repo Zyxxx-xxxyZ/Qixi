@@ -136,6 +136,8 @@ final class QixiMemorySampler {
   private let sampleInterval: TimeInterval
   private let writer: QixiMemoryTelemetryWriter
   private let contextProvider: @MainActor () -> QixiMemoryTelemetryContext
+  /// Optional observer for product memory-pressure policy (soft footprint gate).
+  var onSample: ((QixiMemoryTelemetrySample) -> Void)?
   private var timer: Timer?
   private var peakPhysFootprintBytes: UInt64 = 0
   private var peakResidentSizeBytes: UInt64 = 0
@@ -202,6 +204,7 @@ final class QixiMemorySampler {
       showTerritory: context.showTerritory
     )
     print(Self.consoleLine(for: sample))
+    onSample?(sample)
     Task {
       await writer.append(sample)
     }

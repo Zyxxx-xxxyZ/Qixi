@@ -53,6 +53,7 @@
 		100000000000000000000129 /* b18nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* b18nbt.bin */; };
 		10000000000000000000012A /* b28nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000231 /* b28nbt.bin */; };
 		10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* QixiMemoryTelemetry.swift */; };
+		10000000000000000000015E /* QixiMemoryPressurePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025E /* QixiMemoryPressurePolicy.swift */; };
 		10000000000000000000012C /* core_types.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000233 /* core_types.cpp */; };
 		10000000000000000000012D /* board.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000234 /* board.cpp */; };
 		10000000000000000000012E /* mcts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* mcts.cpp */; };
@@ -69,6 +70,7 @@
 		10000000000000000000025D /* QixiCoreMutationQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiCoreMutationQueue.swift; sourceTree = "<group>"; };
 		10000000000000000000025C /* QixiBlockingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiBlockingSession.swift; sourceTree = "<group>"; };
 		10000000000000000000025B /* QixiVariationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiVariationModel.swift; sourceTree = "<group>"; };
+		10000000000000000000025E /* QixiMemoryPressurePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryPressurePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000206 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		100000000000000000000207 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
 		100000000000000000000208 /* LeftAnalysisPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftAnalysisPane.swift; sourceTree = "<group>"; };
@@ -174,6 +176,7 @@
 				10000000000000000000025D /* QixiCoreMutationQueue.swift */,
 				10000000000000000000025C /* QixiBlockingSession.swift */,
 				10000000000000000000025B /* QixiVariationModel.swift */,
+				10000000000000000000025E /* QixiMemoryPressurePolicy.swift */,
 				100000000000000000000206 /* RootView.swift */,
 				100000000000000000000207 /* BoardView.swift */,
 				100000000000000000000208 /* LeftAnalysisPane.swift */,
@@ -323,6 +326,7 @@
 				10000000000000000000015D /* QixiCoreMutationQueue.swift in Sources */,
 				10000000000000000000015C /* QixiBlockingSession.swift in Sources */,
 				10000000000000000000015B /* QixiVariationModel.swift in Sources */,
+				10000000000000000000015E /* QixiMemoryPressurePolicy.swift in Sources */,
 				100000000000000000000106 /* RootView.swift in Sources */,
 				100000000000000000000107 /* BoardView.swift in Sources */,
 				100000000000000000000108 /* LeftAnalysisPane.swift in Sources */,

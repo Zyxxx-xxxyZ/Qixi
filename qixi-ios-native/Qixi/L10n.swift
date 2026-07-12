@@ -129,6 +129,11 @@ enum L10n {
     case backendRestoringState
     case backendLoadingEngine
     case backendInstallingModel
+    case memoryPressureUnloading
+    case memoryPressureReloading
+    case memoryPressureUnloadingEngine
+    case memoryPressureSavingAndFreeing
+    case memoryPressureStoreUnloaded
     case syncSheetTitle
     case syncEnabled
     case syncDisabled
@@ -205,6 +210,11 @@ enum L10n {
       .backendRestoringState: "正在恢复上次状态",
       .backendLoadingEngine: "正在切换分析引擎",
       .backendInstallingModel: "正在安装分析模型",
+      .memoryPressureUnloading: "正在释放内存",
+      .memoryPressureReloading: "正在恢复分析数据",
+      .memoryPressureUnloadingEngine: "正在卸载引擎以释放内存",
+      .memoryPressureSavingAndFreeing: "正在保存分析并释放内存",
+      .memoryPressureStoreUnloaded: "搜索树已写入磁盘并从内存卸载",
       .syncSheetTitle: "同步",
       .syncEnabled: "iCloud 已开启",
       .syncDisabled: "iCloud 未开启",
@@ -279,6 +289,11 @@ enum L10n {
       .backendRestoringState: "正在恢復上次狀態",
       .backendLoadingEngine: "正在切換分析引擎",
       .backendInstallingModel: "正在安裝分析模型",
+      .memoryPressureUnloading: "正在釋放記憶體",
+      .memoryPressureReloading: "正在恢復分析資料",
+      .memoryPressureUnloadingEngine: "正在卸載引擎以釋放記憶體",
+      .memoryPressureSavingAndFreeing: "正在儲存分析並釋放記憶體",
+      .memoryPressureStoreUnloaded: "搜尋樹已寫入磁碟並從記憶體卸載",
       .syncSheetTitle: "同步",
       .syncEnabled: "iCloud 已開啟",
       .syncDisabled: "iCloud 未開啟",
@@ -353,6 +368,11 @@ enum L10n {
       .backendRestoringState: "Restoring Previous State",
       .backendLoadingEngine: "Switching Analysis Engine",
       .backendInstallingModel: "Installing Analysis Model",
+      .memoryPressureUnloading: "Freeing Memory",
+      .memoryPressureReloading: "Reloading Analysis",
+      .memoryPressureUnloadingEngine: "Unloading engine to free memory",
+      .memoryPressureSavingAndFreeing: "Saving analysis and freeing memory",
+      .memoryPressureStoreUnloaded: "Search tree saved to disk and unloaded from memory",
       .syncSheetTitle: "Sync",
       .syncEnabled: "iCloud Enabled",
       .syncDisabled: "iCloud Disabled",

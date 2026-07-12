@@ -41,6 +41,8 @@ enum class RequestKind : uint8_t {
   recognizePhoto,
   applyRecognizedBoard,
   iCloudSyncNow,
+  /// Product OOM path: checkpoint active store then drop it from RAM (level hard).
+  relieveMemoryPressure,
 };
 
 struct BootRequest { bool loadLastState = true; bool firstLaunch = false; };
@@ -63,6 +65,8 @@ struct ExportSGFRequest { std::string path; bool includeAnalysis = false; };
 struct RecognizePhotoRequest { std::string imagePath; std::array<float, 8> cropQuad{}; };
 struct ApplyRecognizedBoardRequest { BoardState board; Color sideToMove = Color::black; };
 struct ICloudSyncNowRequest {};
+/// level: 0 = soft (checkpoint only, keep store in RAM); 1 = hard (checkpoint + drop store).
+struct RelieveMemoryPressureRequest { uint8_t level = 1; };
 
 using RequestPayload = std::variant<
   BootRequest,
@@ -84,7 +88,8 @@ using RequestPayload = std::variant<
   ExportSGFRequest,
   RecognizePhotoRequest,
   ApplyRecognizedBoardRequest,
-  ICloudSyncNowRequest
+  ICloudSyncNowRequest,
+  RelieveMemoryPressureRequest
 >;
 
 struct FrontendRequest {
@@ -246,6 +251,12 @@ private:
   BackendResult handleRecognizePhoto(const FrontendRequest& request, const RecognizePhotoRequest& payload);
   BackendResult handleApplyRecognizedBoard(const FrontendRequest& request, const ApplyRecognizedBoardRequest& payload);
   BackendResult handleICloudSyncNow(const FrontendRequest& request, const ICloudSyncNowRequest& payload);
+  BackendResult handleRelieveMemoryPressure(
+    const FrontendRequest& request,
+    const RelieveMemoryPressureRequest& payload
+  );
+  /// After OOM drop: load active store from disk if present. Does not create an empty store.
+  bool tryRehydrateStoreFromDisk(std::string& error);
 };
 
 } // namespace qixi::core

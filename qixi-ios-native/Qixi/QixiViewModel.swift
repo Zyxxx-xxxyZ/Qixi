@@ -79,6 +79,8 @@ enum QixiBackendTransition: Equatable {
   case exportingState
   case importingState
   case installingModel
+  case memoryUnload
+  case memoryReload
 
   var statusText: String {
     switch self {
@@ -92,6 +94,10 @@ enum QixiBackendTransition: Equatable {
       return L10n.text(.mctsStateImporting)
     case .installingModel:
       return L10n.text(.backendInstallingModel)
+    case .memoryUnload:
+      return L10n.text(.memoryPressureUnloading)
+    case .memoryReload:
+      return L10n.text(.memoryPressureReloading)
     }
   }
 
@@ -102,12 +108,14 @@ enum QixiBackendTransition: Equatable {
     case .exportingState: return .exportingState
     case .importingState: return .importingState
     case .installingModel: return .installingModel
+    case .memoryUnload: return .memoryUnload
+    case .memoryReload: return .memoryReload
     }
   }
 }
 
 @MainActor
-final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
+final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPressureHost {
   private static let variationRootID = QixiVariationModel.rootID
   private static let autosaveInterval: TimeInterval = 20 * 60
   private static let saveDebounceNanoseconds: UInt64 = 600_000_000
@@ -208,6 +216,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
   private var isApplyingSnapshot = false
   private var hasExportedAutomationRealDeviceEvidence = false
   private var memorySampler: QixiMemorySampler?
+  private let memoryPressurePolicy = QixiMemoryPressurePolicy()
   var coreBackendEpoch: UInt64 = 0
   var coreRevision: UInt64 = 0
   private var coreCurrentRootID: UInt32 = 0
@@ -347,6 +356,10 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
       self?.memoryTelemetryContext() ?? QixiMemoryTelemetryContext.empty
     }
     memorySampler?.start()
+    memorySampler?.onSample = { [weak self] sample in
+      self?.memoryPressurePolicy.noteFootprintSample(physFootprintBytes: sample.physFootprintBytes)
+    }
+    memoryPressurePolicy.start(host: self)
     utilitySheet = QixiUtilitySheet(automationValue: processEnvironment["QIXI_OPEN_UTILITY_SHEET"])
   }
 
@@ -361,6 +374,10 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
       Task { @MainActor in
         memorySampler.stop(reason: "deinit")
       }
+    }
+    // Policy stop is main-actor; best-effort from deinit context.
+    Task { @MainActor [memoryPressurePolicy] in
+      memoryPressurePolicy.stop()
     }
   }
 
@@ -2689,6 +2706,89 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
       }
     }
     analysisByEngine[engine.rawValue] = engineCache
+  }
+
+  // MARK: - Product OOM unload (QixiMemoryPressureHost)
+
+  func applySoftMemoryPressureRelief() async {
+    memorySampler?.record(reason: "memoryPressure:soft")
+    trimAnalysisCacheForMemoryPressure()
+    guard selectedEngine != .none else { return }
+    let token = beginBackendTransition(.memoryUnload)
+    defer { finishBackendTransition(token) }
+    updateBackendTransitionProgress(
+      token,
+      phase: L10n.text(.memoryPressureUnloadingEngine),
+      fraction: 0.4
+    )
+    do {
+      try await submitCoreEngineSelectionAndWait(.none, reason: "coreMemoryPressureSoftUnload")
+      selectedEngine = .none
+      hermesStatus = .offline
+      analysisTask?.cancel()
+      analysisRefreshTask?.cancel()
+      updateBackendTransitionProgress(
+        token,
+        phase: L10n.text(.memoryPressureUnloadingEngine),
+        fraction: 1.0
+      )
+    } catch {
+      lastEngineError = error.localizedDescription
+      recordRuntimeDiagnostic(
+        event: "memoryPressureSoftUnloadFailed",
+        success: false,
+        message: error.localizedDescription
+      )
+    }
+  }
+
+  func applyHardMemoryPressureRelief() async {
+    memorySampler?.record(reason: "memoryPressure:hard")
+    // Ensure NN is not resident before serializing a large store under pressure.
+    if selectedEngine != .none {
+      await applySoftMemoryPressureRelief()
+    }
+    guard coreBackendService != nil else { return }
+    let token = beginBackendTransition(.memoryUnload)
+    startIoProgressPolling(for: token)
+    defer { finishBackendTransition(token) }
+    updateBackendTransitionProgress(
+      token,
+      phase: L10n.text(.memoryPressureSavingAndFreeing),
+      fraction: 0.1
+    )
+    do {
+      await waitForCoreMutationDrain()
+      try await submitCoreMutationAndWait(
+        .relieveMemoryPressure(level: 1, expectedBackendEpoch: 0),
+        reason: "coreMemoryPressureHardUnload"
+      )
+      updateBackendTransitionProgress(
+        token,
+        phase: L10n.text(.memoryPressureSavingAndFreeing),
+        fraction: 1.0,
+        detail: L10n.text(.memoryPressureStoreUnloaded)
+      )
+      memorySampler?.record(reason: "memoryPressure:hardDone")
+    } catch {
+      lastEngineError = error.localizedDescription
+      recordRuntimeDiagnostic(
+        event: "memoryPressureHardUnloadFailed",
+        success: false,
+        message: error.localizedDescription
+      )
+    }
+  }
+
+  private func trimAnalysisCacheForMemoryPressure() {
+    // Keep at most the current position entry for the active engine; drop the rest.
+    let currentKey = currentAnalysisCacheKey(for: selectedEngine)
+    var trimmed: [String: [String: QixiCachedAnalysis]] = [:]
+    if selectedEngine != .none, let currentKey,
+       let entry = analysisByEngine[selectedEngine.rawValue]?[currentKey] {
+      trimmed[selectedEngine.rawValue] = [currentKey: entry]
+    }
+    analysisByEngine = trimmed
   }
 
   private func memoryTelemetryContext() -> QixiMemoryTelemetryContext {

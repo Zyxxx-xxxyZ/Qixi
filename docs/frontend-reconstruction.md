@@ -43,9 +43,23 @@ Logic extracted into:
 ## Not yet done (next slices)
 
 - Further slimming: analysis cache module, persistence coordinator, feature plugins.
-- Streaming deserialize / true byte-progress during parse.
 - Incremental variation projection (diff apply).
-- OOM unload policy wired to memory pressure.
+- ~~Streaming deserialize / true byte-progress during parse~~ **done** (`deserializeFromFile` + progress; single-store import path).
+- ~~OOM unload policy wired to memory pressure~~ **done** (see below).
 - ~~Delete dual HTTP analysis path from product session~~ **done** (factory + ViewModel core-only; HTTP sources excluded from app target).
+
+## OOM unload policy (landed)
+
+Tiered product path:
+
+| Tier | Trigger | Action |
+| --- | --- | --- |
+| Soft | `didReceiveMemoryWarning` (first) or footprint ≥ physical − 512 MiB | Trim UI analysis cache; `selectEngine(none)` unload NN |
+| Hard | Second warning in window | Core `relieveMemoryPressure` level=1: checkpoint → drop live `MCTSStore` |
+| Fail-soft | Checkpoint fails | Do not drop store; keep NN unloaded if soft already ran |
+
+- Snapshot polls do **not** rehydrate the tree (stay free until a mutation).
+- Mutations rehydrate from `active-store.index` / current key via `ensureStoreReady`.
+- UI: `QixiMemoryPressurePolicy` + `QixiBackendTransition.memoryUnload` + L10n progress chrome.
 
 See the plan discussion in session notes for full architecture.

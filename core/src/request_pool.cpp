@@ -602,13 +602,19 @@ BackendResult BackendWorker::latestSnapshot() const {
   result.requestId = 0;
   result.backendEpoch = ctx.backendEpoch;
   result.revision = ctx.revision;
-  result.ok = ctx.store != nullptr && ctx.storeState == StoreState::ready;
-  result.message = result.ok ? "snapshot copied" : "store is not ready";
-  result.currentRoot = ctx.store ? ctx.store->currentRoot() : kInvalidNode;
+  // Do not rehydrate on poll — OOM unload must stay free until a mutation.
+  result.ok = true;
   result.engineState = ctx.engineState;
   result.storeState = ctx.storeState;
-  if(ctx.store)
+  if(ctx.store && ctx.storeState == StoreState::ready) {
+    result.message = "snapshot copied";
+    result.currentRoot = ctx.store->currentRoot();
     result.snapshot = ctx.store->snapshot();
+  }
+  else {
+    result.message = "store not resident";
+    result.currentRoot = kInvalidNode;
+  }
   return result;
 }
 
@@ -622,13 +628,19 @@ BackendResult BackendWorker::latestLightSnapshot(
   result.requestId = 0;
   result.backendEpoch = ctx.backendEpoch;
   result.revision = ctx.revision;
-  result.ok = ctx.store != nullptr && ctx.storeState == StoreState::ready;
-  result.message = result.ok ? "light snapshot copied" : "store is not ready";
-  result.currentRoot = ctx.store ? ctx.store->currentRoot() : kInvalidNode;
+  // Do not rehydrate on poll — OOM unload must stay free until a mutation.
+  result.ok = true;
   result.engineState = ctx.engineState;
   result.storeState = ctx.storeState;
-  if(ctx.store)
+  if(ctx.store && ctx.storeState == StoreState::ready) {
+    result.message = "light snapshot copied";
+    result.currentRoot = ctx.store->currentRoot();
     result.snapshot = ctx.store->snapshotLight(maxCandidates, maxVisibleNodes, includeOwnership);
+  }
+  else {
+    result.message = "store not resident";
+    result.currentRoot = kInvalidNode;
+  }
   return result;
 }
 
@@ -781,11 +793,47 @@ void BackendWorker::publish(const BackendResult& result) const {
     callback(result);
 }
 
+bool BackendWorker::tryRehydrateStoreFromDisk(std::string& error) {
+  error.clear();
+  if(ctx.store && ctx.storeState == StoreState::ready)
+    return true;
+  if(ctx.storeDirectory.empty()) {
+    error = "store directory is not configured";
+    return false;
+  }
+  auto loaded = loadActiveStore(error);
+  if(!error.empty())
+    return false;
+  if(!loaded) {
+    // Fall back to current analysis key file when the active index is missing.
+    loaded = loadStore(ctx.currentKey, error);
+    if(!error.empty())
+      return false;
+  }
+  if(!loaded) {
+    error = "no checkpointed store is available to rehydrate";
+    return false;
+  }
+  ctx.store = std::make_unique<MCTSStore>(std::move(*loaded));
+  ctx.currentKey = ctx.store->analysisKey();
+  ctx.params = ctx.store->searchParams();
+  ctx.store->setEvaluator(ctx.evaluator);
+  ctx.storeState = StoreState::ready;
+  return true;
+}
+
 bool BackendWorker::ensureStoreReady(BackendResult& result) {
   if(ctx.store && ctx.storeState == StoreState::ready)
     return true;
+  // Product OOM path drops the live store after checkpoint. Mutations rehydrate
+  // from disk; snapshot polls must not call this (see latestLightSnapshot).
+  std::string error;
+  if(tryRehydrateStoreFromDisk(error)) {
+    bumpRevision();
+    return true;
+  }
   result.ok = false;
-  result.message = "store is not ready";
+  result.message = error.empty() ? "store is not ready" : error;
   return false;
 }
 
@@ -957,6 +1005,8 @@ BackendResult BackendWorker::executeRequest(const FrontendRequest& request) {
     case RequestKind::recognizePhoto: return handleRecognizePhoto(request, std::get<RecognizePhotoRequest>(request.payload));
     case RequestKind::applyRecognizedBoard: return handleApplyRecognizedBoard(request, std::get<ApplyRecognizedBoardRequest>(request.payload));
     case RequestKind::iCloudSyncNow: return handleICloudSyncNow(request, std::get<ICloudSyncNowRequest>(request.payload));
+    case RequestKind::relieveMemoryPressure:
+      return handleRelieveMemoryPressure(request, std::get<RelieveMemoryPressureRequest>(request.payload));
     }
   }
   catch(const std::exception& ex) {
@@ -1588,6 +1638,69 @@ BackendResult BackendWorker::handleICloudSyncNow(const FrontendRequest& request,
   if(!checkpointCurrentStore(error))
     return baseResult(request, false, error);
   return baseResult(request, true, "icloud sync checkpoint prepared for platform layer");
+}
+
+BackendResult BackendWorker::handleRelieveMemoryPressure(
+  const FrontendRequest& request,
+  const RelieveMemoryPressureRequest& payload
+) {
+  // Soft (0): durable checkpoint only; keep the live store. Hard (1): checkpoint then
+  // drop the live store from RAM. Product Swift owns NN unload ordering.
+  if(payload.level == 0) {
+    setIoProgress(true, "checkpointing", 0.2, 0, 0, "Checkpointing store under memory pressure");
+    std::string error;
+    if(!checkpointCurrentStore(error)) {
+      clearIoProgress();
+      return baseResult(request, false, error.empty() ? "soft memory checkpoint failed" : error);
+    }
+    setIoProgress(true, "complete", 1.0, 0, 0, "Soft memory checkpoint complete");
+    clearIoProgress();
+    auto result = baseResult(request, true, "memory pressure soft: store checkpointed");
+    if(ctx.store)
+      result.snapshot = ctx.store->snapshotLight(32, 4096, true);
+    return result;
+  }
+
+  if(payload.level != 1)
+    return baseResult(request, false, "unsupported relieveMemoryPressure level");
+
+  if(!ctx.store) {
+    auto result = baseResult(request, true, "memory pressure hard: store already not resident");
+    return result;
+  }
+  if(ctx.storeDirectory.empty()) {
+    return baseResult(
+      request,
+      false,
+      "cannot unload store from RAM without a store directory (would lose analysis)"
+    );
+  }
+
+  const StoreMemoryStats before = ctx.store->memoryStats();
+  setIoProgress(true, "checkpointing", 0.15, 0, before.estimatedArenaBytes, "Saving analysis before unload");
+  std::string error;
+  if(!checkpointCurrentStore(error)) {
+    clearIoProgress();
+    return baseResult(
+      request,
+      false,
+      error.empty() ? "hard memory unload aborted: checkpoint failed" : error
+    );
+  }
+
+  setIoProgress(true, "unloading", 0.85, before.estimatedArenaBytes, before.estimatedArenaBytes, "Dropping live MCTS store");
+  ctx.store.reset();
+  ctx.storeState = StoreState::empty;
+  // Keep currentKey / intent map / engine identity; mutations rehydrate from disk.
+  bumpRevision();
+  setIoProgress(true, "complete", 1.0, before.estimatedArenaBytes, before.estimatedArenaBytes, "Store unloaded from RAM");
+  clearIoProgress();
+
+  std::ostringstream message;
+  message << "memory pressure hard: store unloaded nodes=" << before.nodeCount
+          << " actions=" << before.actionCount
+          << " arenaBytes~=" << before.estimatedArenaBytes;
+  return baseResult(request, true, message.str());
 }
 
 } // namespace qixi::core

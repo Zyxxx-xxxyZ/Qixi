@@ -977,6 +977,19 @@ NativeKataGoResult parseCoreFrontendRequestJSON(
     payload = body;
     return okResult("core request parsed");
   }
+  if(kindString == "relieveMemoryPressure") {
+    core::RelieveMemoryPressureRequest body;
+    uint64_t level = 1;
+    if(hasPayload &&
+       !optionalUnsignedIntegerField(requestJSON, payloadStart, payloadEnd, "level", 255, level))
+      return invalidRequestResult("Core relieveMemoryPressure payload.level is invalid.");
+    if(level > 1)
+      return invalidRequestResult("Core relieveMemoryPressure level must be 0 (soft) or 1 (hard).");
+    body.level = static_cast<uint8_t>(level);
+    kind = core::RequestKind::relieveMemoryPressure;
+    payload = body;
+    return okResult("core request parsed");
+  }
   if(kindString == "applyRecognizedBoard") {
     if(!hasPayload)
       return invalidRequestResult("Core applyRecognizedBoard requires a payload.");

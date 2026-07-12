@@ -290,6 +290,8 @@ enum QixiCoreRequest: Encodable {
   case exportAnalysisState(path: String, expectedBackendEpoch: UInt64 = 0)
   case importAnalysisState(path: String, expectedBackendEpoch: UInt64 = 0)
   case applyRecognizedBoard(setupStones: [BoardSetupStone], nextPla: StoneColor, expectedBackendEpoch: UInt64 = 0)
+  /// Product OOM path. level 0 = soft checkpoint; level 1 = hard checkpoint + drop live store.
+  case relieveMemoryPressure(level: UInt8, expectedBackendEpoch: UInt64 = 0)
 
   private enum CodingKeys: String, CodingKey {
     case kind
@@ -317,6 +319,7 @@ enum QixiCoreRequest: Encodable {
     case reason
     case path
     case setupStones
+    case level
   }
 
   func encode(to encoder: Encoder) throws {
@@ -393,6 +396,10 @@ enum QixiCoreRequest: Encodable {
       try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
       try payload.encode(setupStones, forKey: .setupStones)
       try payload.encode(nextPla == .black ? "black" : "white", forKey: .nextPla)
+    case .relieveMemoryPressure(let level, let expectedBackendEpoch):
+      try container.encode("relieveMemoryPressure", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(level, forKey: .level)
     }
   }
 }
@@ -436,6 +443,8 @@ extension QixiCoreRequest {
         nextPla: nextPla,
         expectedBackendEpoch: epoch
       )
+    case .relieveMemoryPressure(let level, _):
+      return .relieveMemoryPressure(level: level, expectedBackendEpoch: epoch)
     }
   }
 }

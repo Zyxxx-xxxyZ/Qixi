@@ -41,8 +41,8 @@ struct QixiBlockingJob: Equatable, Identifiable {
     case .exportingState: return L10n.text(.mctsStateExporting)
     case .importingState: return L10n.text(.mctsStateImporting)
     case .installingModel: return L10n.text(.backendInstallingModel)
-    case .memoryUnload: return L10n.text(.backendRestoringState)
-    case .memoryReload: return L10n.text(.backendRestoringState)
+    case .memoryUnload: return L10n.text(.memoryPressureUnloading)
+    case .memoryReload: return L10n.text(.memoryPressureReloading)
     }
   }
 
