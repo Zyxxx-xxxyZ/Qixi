@@ -67,9 +67,7 @@
 		</dict>
 	</dict>
 	<key>QixiAnalysisRuntime</key>
-	<string>httpBridge</string>
-	<key>QixiBackendBaseURL</key>
-	<string>http://127.0.0.1:8765</string>
+	<string>nativeInProcess</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

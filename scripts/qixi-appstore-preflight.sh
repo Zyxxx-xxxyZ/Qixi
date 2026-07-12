@@ -404,10 +404,10 @@ if SUBMISSION_MODE:
     fail_many("submission mode blockers remain", submission_blockers)
   print("App Store submission preflight passed")
 else:
-  if info.get("QixiAnalysisRuntime") != "httpBridge":
-    fail("development preflight expects QixiAnalysisRuntime=httpBridge until native KataGo is linked")
-  if info.get("QixiBackendBaseURL") != "http://127.0.0.1:8765":
-    fail("development preflight expects the simulator backend URL to remain explicit")
+  if info.get("QixiAnalysisRuntime") != "nativeInProcess":
+    fail("development preflight expects QixiAnalysisRuntime=nativeInProcess (HTTP product path removed)")
+  if "QixiBackendBaseURL" in info:
+    fail("development preflight expects QixiBackendBaseURL removed from product Info.plist")
   if "class PlaceholderNativeKataGoEngine final" not in engine_impl:
     fail("development preflight expected the placeholder native engine marker to be explicit")
   if "Native KataGo is not linked into this build." not in engine_impl:

@@ -609,147 +609,30 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
     rollbackEngine: AnalysisEngine? = nil,
     preservedEngineError: String? = nil
   ) {
-    if let coreBackendService {
-      startCoreSnapshotPolling(
-        engine: engine,
-        assumesEngineAlreadyLoaded: assumesEngineAlreadyLoaded,
-        coreBackendService: coreBackendService,
-        transitionToken: transitionToken,
-        rollbackEngine: rollbackEngine,
-        preservedEngineError: preservedEngineError
+    // Product path: core::MCTSStore only via NativeKataGoAnalysisService. No HTTP analyze loop.
+    guard let coreBackendService else {
+      finishBackendTransition(transitionToken)
+      lastEngineError = L10n.text(.engineErrorLibraryNotLinked)
+      hermesStatus = .offline
+      recordRuntimeDiagnostic(
+        event: "analysisUnavailable",
+        success: false,
+        message: "core backend service is required; HTTP bridge product path removed"
       )
+      if let rollbackEngine, rollbackEngine != engine {
+        selectedEngine = rollbackEngine
+        saveNow(reason: "engineSelectionRolledBack")
+      }
       return
     }
-    analysisTask?.cancel()
-    analysisGeneration += 1
-    let generation = analysisGeneration
-    let requestMoves = boardMoves
-    let requestSetupStones = analysisSetupStones
-    let requestKomi = komi
-    let requestRootNoise = rootNoise
-    let requestIdentity = QixiAnalysisRequestIdentity(
+    startCoreSnapshotPolling(
       engine: engine,
-      moves: requestMoves,
-      setupStones: requestSetupStones,
-      komi: requestKomi,
-      rootNoise: requestRootNoise
+      assumesEngineAlreadyLoaded: assumesEngineAlreadyLoaded,
+      coreBackendService: coreBackendService,
+      transitionToken: transitionToken,
+      rollbackEngine: rollbackEngine,
+      preservedEngineError: preservedEngineError
     )
-    let restoredCache = restoreCachedAnalysis(engine: engine, cacheKey: requestIdentity.cacheKey)
-    if !restoredCache {
-      clearVisibleAnalysisAndRefreshAnchor()
-    }
-    let restoredVisits = analysisByEngine[engine.rawValue]?[requestIdentity.cacheKey]?.visits ?? 0
-    if !assumesEngineAlreadyLoaded {
-      hermesStatus = .loading
-    }
-    analysisTask = Task { [weak self] in
-      guard let self else { return }
-      var engineLoadCommitted = assumesEngineAlreadyLoaded
-      do {
-        if !assumesEngineAlreadyLoaded {
-          await waitForCoreMutationDrain()
-          let status = try await analysisService.setEngine(engine)
-          recordRuntimeDiagnostic(
-            event: "backendSetEngine",
-            success: true,
-            message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state)"
-          )
-          engineLoadCommitted = true
-        }
-        finishBackendTransition(transitionToken)
-        var round = 0
-        var visitBatch = Self.realtimeAnalysisInitialVisitBatch
-        var targetVisits = Self.nextRealtimeAnalysisTarget(after: restoredVisits, batch: visitBatch)
-        while true {
-          try Task.checkCancellation()
-          guard generation == analysisGeneration,
-                requestIdentity.matches(
-                  engine: selectedEngine,
-                  moves: boardMoves,
-                  setupStones: analysisSetupStones,
-                  komi: komi,
-                  rootNoise: rootNoise
-                ) else { return }
-          let analysisStartedAt = Date()
-          let response = try await analysisService.analyze(
-            moves: requestMoves,
-            setupStones: requestSetupStones,
-            maxVisits: targetVisits,
-            komi: requestKomi,
-            rootNoise: requestRootNoise
-          )
-          let responseInterval = Date().timeIntervalSince(analysisStartedAt)
-          try Task.checkCancellation()
-          guard generation == analysisGeneration,
-                requestIdentity.matches(
-                  engine: selectedEngine,
-                  moves: boardMoves,
-                  setupStones: analysisSetupStones,
-                  komi: komi,
-                  rootNoise: rootNoise
-                ) else { return }
-          round += 1
-          let shouldRecordDiagnostic = round == 1 || round.isMultiple(of: Self.realtimeAnalysisDiagnosticEveryRounds)
-          let shouldAutosave = round == 1 || round.isMultiple(of: Self.realtimeAnalysisAutosaveEveryRounds)
-          let didApply = try apply(
-            response,
-            engine: engine,
-            cacheKey: requestIdentity.cacheKey,
-            recordDiagnostic: shouldRecordDiagnostic,
-            scheduleSave: shouldAutosave
-          )
-          lastEngineError = preservedEngineError
-          hermesStatus = .ready
-          let observedVisits = didApply
-            ? responseRootVisits(response)
-            : max(responseRootVisits(response), targetVisits)
-          if max(targetVisits, observedVisits) >= QixiAnalysisLimits.maxMaxVisits {
-            return
-          }
-          visitBatch = Self.adjustedRealtimeAnalysisVisitBatch(
-            currentBatch: visitBatch,
-            responseInterval: responseInterval
-          )
-          targetVisits = Self.nextRealtimeAnalysisTarget(
-            after: max(targetVisits, observedVisits),
-            batch: visitBatch
-          )
-        }
-      } catch {
-        finishBackendTransition(transitionToken)
-        guard !Task.isCancelled else { return }
-        if !engineLoadCommitted, let rollbackEngine {
-          let failure = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
-          selectedEngine = rollbackEngine
-          lastEngineError = failure
-          saveNow(reason: "engineSelectionRolledBack")
-          if rollbackEngine != .none {
-            startAnalysis(
-              engine: rollbackEngine,
-              assumesEngineAlreadyLoaded: true,
-              preservedEngineError: failure
-            )
-          } else {
-            hermesStatus = .offline
-          }
-          return
-        }
-        guard generation == analysisGeneration,
-              requestIdentity.matches(
-                engine: selectedEngine,
-                moves: boardMoves,
-                setupStones: analysisSetupStones,
-                komi: komi,
-                rootNoise: rootNoise
-              ) else { return }
-        if !restoredCache {
-          clearVisibleAnalysis()
-        }
-        lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
-        hermesStatus = .offline
-        recordRuntimeDiagnostic(event: "analysisFailed", success: false, message: String(describing: error))
-      }
-    }
   }
 
   private func startCoreSnapshotPolling(
@@ -2671,11 +2554,8 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
   }
 
   private func diagnosticBackendBaseURL() -> String {
-    #if QIXI_NATIVE_RELEASE
-    return ""
-    #else
-    return QixiRuntimeConfig.backendBaseURL().absoluteString
-    #endif
+    // HTTP product path removed; diagnostics no longer record a Mac backend URL.
+    ""
   }
 
   private func setICloudSyncEnabled(_ enabled: Bool) {

@@ -46,6 +46,6 @@ Logic extracted into:
 - Streaming deserialize / true byte-progress during parse.
 - Incremental variation projection (diff apply).
 - OOM unload policy wired to memory pressure.
-- Delete dual HTTP analysis path from product session.
+- ~~Delete dual HTTP analysis path from product session~~ **done** (factory + ViewModel core-only; HTTP sources excluded from app target).
 
 See the plan discussion in session notes for full architecture.

@@ -504,36 +504,43 @@ protocol QixiCoreBackendService {
 }
 
 extension QixiRuntimeConfig {
-  #if QIXI_NATIVE_RELEASE
-  static func analysisRuntime(
-    environment: [String: String] = ProcessInfo.processInfo.environment,
-    defaults: UserDefaults = .standard,
-    bundle: Bundle = .main
-  ) -> QixiAnalysisRuntime {
-    .nativeInProcess
-  }
-  #else
   static let analysisRuntimeDefaultsKey = "qixi.analysisRuntime"
   static let analysisRuntimeEnvironmentKey = "QIXI_ANALYSIS_RUNTIME"
   static let analysisRuntimeInfoPlistKey = "QixiAnalysisRuntime"
-  static let defaultAnalysisRuntime = QixiAnalysisRuntime.httpBridge
+  /// Product path is always in-process core MCTS + NN. HTTP bridge is not a product runtime.
+  static let defaultAnalysisRuntime = QixiAnalysisRuntime.nativeInProcess
 
   static func analysisRuntime(
     environment: [String: String] = ProcessInfo.processInfo.environment,
     defaults: UserDefaults = .standard,
     bundle: Bundle = .main
   ) -> QixiAnalysisRuntime {
+    #if QIXI_NATIVE_RELEASE
+    return .nativeInProcess
+    #else
+    // Even in Debug, product path is nativeInProcess. Explicit httpBridge env is ignored
+    // for the app factory (HTTP sources are excluded from the app target).
     if let value = environment[analysisRuntimeEnvironmentKey], let runtime = normalizedRuntime(value) {
+      if runtime == .httpBridge {
+        return .nativeInProcess
+      }
       return runtime
     }
     if let value = defaults.string(forKey: analysisRuntimeDefaultsKey), let runtime = normalizedRuntime(value) {
+      if runtime == .httpBridge {
+        return .nativeInProcess
+      }
       return runtime
     }
     if let value = bundle.object(forInfoDictionaryKey: analysisRuntimeInfoPlistKey) as? String,
        let runtime = normalizedRuntime(value) {
+      if runtime == .httpBridge {
+        return .nativeInProcess
+      }
       return runtime
     }
     return defaultAnalysisRuntime
+    #endif
   }
 
   private static func normalizedRuntime(_ rawValue: String) -> QixiAnalysisRuntime? {
@@ -552,7 +559,6 @@ extension QixiRuntimeConfig {
       return nil
     }
   }
-  #endif
 }
 
 enum QixiAnalysisServiceFactory {
@@ -561,12 +567,10 @@ enum QixiAnalysisServiceFactory {
   }
 
   static func makeService(runtime: QixiAnalysisRuntime) -> any QixiAnalysisService {
+    // Product analysis is always NativeKataGoAnalysisService (core::MCTSStore + NN).
+    // HTTP bridge is not constructed by the app target.
     switch runtime {
-    #if !QIXI_NATIVE_RELEASE
-    case .httpBridge:
-      return HTTPBridgeAnalysisService()
-    #endif
-    case .nativeInProcess:
+    case .httpBridge, .nativeInProcess:
       return NativeKataGoAnalysisService()
     }
   }
