@@ -384,7 +384,12 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
 
   var currentChartPoint: ChartPoint? {
     guard let cached = cachedChartAnalysis(at: currentPly) else { return nil }
-    return ChartPoint(ply: currentPly, winrate: cached.winrate, scoreMean: cached.scoreMean)
+    let (winrate, scoreMean) = Self.blackSideChartValues(
+      winrate: cached.winrate,
+      scoreMean: cached.scoreMean,
+      atPly: currentPly
+    )
+    return ChartPoint(ply: currentPly, winrate: winrate, scoreMean: scoreMean)
   }
 
   var chartPoints: [ChartPoint] {
@@ -394,10 +399,29 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     points.reserveCapacity(lastPly + 1)
     for ply in 0...lastPly {
       if let cached = cachedChartAnalysis(at: ply) {
-        points.append(ChartPoint(ply: ply, winrate: cached.winrate, scoreMean: cached.scoreMean))
+        let (winrate, scoreMean) = Self.blackSideChartValues(
+          winrate: cached.winrate,
+          scoreMean: cached.scoreMean,
+          atPly: ply
+        )
+        points.append(ChartPoint(ply: ply, winrate: winrate, scoreMean: scoreMean))
       }
     }
     return points
+  }
+
+  /// Chart/corner display is always Black's winrate and score lead.
+  /// Core snapshots are side-to-move; flip when it is White to play (odd ply / even step if 1-based).
+  private static func blackSideChartValues(
+    winrate: Double,
+    scoreMean: Double,
+    atPly ply: Int
+  ) -> (Double, Double) {
+    // ply == moves played: even → Black to move, odd → White to move.
+    guard !ply.isMultiple(of: 2) else {
+      return (winrate, scoreMean)
+    }
+    return (1.0 - winrate, -scoreMean)
   }
 
   var variationTree: VariationTree {
