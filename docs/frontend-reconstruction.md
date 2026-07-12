@@ -46,11 +46,25 @@ Logic extracted into:
 ## Not yet done (next slices)
 
 - Further slimming: feature plugins (camera/SGF/sync UI modules).
-- Incremental variation projection (diff apply).
+- ~~Incremental variation projection (diff apply)~~ **done** (see below).
 - ~~Analysis cache module + persistence coordinator~~ **done** (phase 2).
 - ~~Streaming deserialize / true byte-progress during parse~~ **done** (`deserializeFromFile` + progress; single-store import path).
 - ~~OOM unload policy wired to memory pressure~~ **done** (see below).
 - ~~Delete dual HTTP analysis path from product session~~ **done** (factory + ViewModel core-only; HTTP sources excluded from app target).
+
+## Incremental variation projection (landed)
+
+`QixiVariationModel.apply(from:)` replaces full rebuild on the core poll path:
+
+| Case | Result |
+| --- | --- |
+| Same topology fingerprint | **metricsOnly** — patch quality deltas; keep records/lanes |
+| Topology change (add/remove branches) | **structureChanged** — lineage set-diff + lane recompute |
+| Local/`vN` tree → core | Full rebuild into `l{lineageHash}` ids |
+| Empty `visibleTree` | **noOp** (preserve prior projection) |
+
+ViewModel only rewrites `mainLine` / `currentPly` when the path moves change. Smoke:
+`qixi-ios-native/tests/run_variation_incremental_smoke.sh`.
 
 ## OOM unload policy (landed)
 

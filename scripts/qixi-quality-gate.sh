@@ -109,6 +109,7 @@ run_step "native SGF parser smoke" qixi-ios-native/tests/run_sgf_parser_smoke.sh
 run_step "native board legality crosscheck smoke" qixi-ios-native/tests/run_board_legality_crosscheck.sh
 run_step "native board recognition smoke" qixi-ios-native/tests/run_board_recognition_smoke.sh
 run_step "native variation tree layout smoke" qixi-ios-native/tests/run_variation_tree_layout_smoke.sh
+run_step "native variation incremental smoke" qixi-ios-native/tests/run_variation_incremental_smoke.sh
 run_step "native analysis service smoke" qixi-ios-native/tests/run_analysis_service_smoke.sh
 run_step "native in-process contract preflight" scripts/qixi-native-inprocess-contract-preflight.sh
 run_step "native KataGo adapter compile probe" qixi-ios-native/tests/run_native_katago_adapter_compile_probe.sh

@@ -1999,11 +1999,18 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   private func rebuildVariationTree(from snapshot: QixiCoreSnapshot) {
-    variation.rebuild(from: snapshot, boardMove: { move, color in
+    _ = variation.apply(from: snapshot, boardMove: { move, color in
       boardMove(fromCoreMove: move, color: color)
     })
-    mainLine = variation.currentPathNodeIDs.compactMap { variation.records[$0]?.move }
-    currentPly = min(variation.records[variation.currentNodeID]?.ply ?? 0, mainLine.count)
+    let newMainLine = variation.currentPathNodeIDs.compactMap { variation.records[$0]?.move }
+    let newPly = min(variation.records[variation.currentNodeID]?.ply ?? 0, newMainLine.count)
+    // Avoid @Published churn / board cache rebuild when the path is unchanged.
+    if newMainLine != mainLine {
+      mainLine = newMainLine
+    }
+    if newPly != currentPly {
+      currentPly = newPly
+    }
   }
 
   private func coreVariationNodeID(_ lineageHash: UInt64) -> String {
