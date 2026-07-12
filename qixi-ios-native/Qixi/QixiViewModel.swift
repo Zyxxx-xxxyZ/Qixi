@@ -47,18 +47,6 @@ private enum QixiAutomationEvidenceError: Error, LocalizedError {
   }
 }
 
-private struct QixiCoreBarrierError: Error, LocalizedError {
-  let operation: String
-  let backendMessage: String?
-
-  var errorDescription: String? {
-    if let backendMessage, !backendMessage.isEmpty {
-      return "Qixi core \(operation) failed: \(backendMessage)"
-    }
-    return "Qixi core \(operation) failed."
-  }
-}
-
 private enum QixiAutomationEvidenceExportTrigger {
   case analysis
   case launch
@@ -73,15 +61,6 @@ private enum QixiAutomationEvidenceExportTrigger {
   }
 }
 
-private struct QixiVariationNodeRecord: Equatable {
-  var id: String
-  var parentID: String?
-  var move: BoardMove?
-  var ply: Int
-  var lane: Int
-  var isInitial: Bool
-}
-
 private struct QixiNextMoveOverlayContext: Equatable {
   var x: Int
   var y: Int
@@ -92,19 +71,6 @@ private struct QixiNextMoveOverlayContext: Equatable {
   var pointID: Int {
     y * 19 + x
   }
-}
-
-private enum QixiQueuedCoreOperation {
-  case request(QixiCoreRequest)
-  case selectEngine(AnalysisEngine)
-}
-
-private struct QixiPendingCoreMutation {
-  var operation: QixiQueuedCoreOperation
-  var reason: String
-  var optimisticVariationNodeID: String?
-  var uiIntentID: UInt64?
-  var completion: (@MainActor (Bool) -> Void)?
 }
 
 enum QixiBackendTransition: Equatable {
@@ -141,8 +107,8 @@ enum QixiBackendTransition: Equatable {
 }
 
 @MainActor
-final class QixiViewModel: ObservableObject {
-  private static let variationRootID = "root"
+final class QixiViewModel: ObservableObject, QixiCoreMutationHost {
+  private static let variationRootID = QixiVariationModel.rootID
   private static let autosaveInterval: TimeInterval = 20 * 60
   private static let saveDebounceNanoseconds: UInt64 = 600_000_000
   private static let maxCachedPositionsPerEngine = 96
@@ -224,7 +190,7 @@ final class QixiViewModel: ObservableObject {
   private(set) var occupiedBoardPointIDs = Set<Int>()
   private(set) var nextMoveCapturedBoardPointIDs = Set<Int>()
 
-  private let analysisService: any QixiAnalysisService
+  let analysisService: any QixiAnalysisService
   private var analysisTask: Task<Void, Never>?
   private var analysisRefreshTask: Task<Void, Never>?
   private var saveTask: Task<Void, Never>?
@@ -238,59 +204,34 @@ final class QixiViewModel: ObservableObject {
   private var cachedVisibleCandidates: [CandidateMove] = []
   private var cachedVisibleCandidateOverlays: [VisibleCandidateOverlay] = []
   private var recognizedSetupStones: [BoardSetupStone]?
-  private var variationRecords: [String: QixiVariationNodeRecord] = [:]
-  private var variationChildIDsByParent: [String: [String]] = [:]
-  private var currentVariationNodeID = QixiViewModel.variationRootID
-  private var currentVariationPathNodeIDs = [QixiViewModel.variationRootID]
-  private var nextVariationNodeSequence = 1
+  private var variation = QixiVariationModel()
   private var isApplyingSnapshot = false
   private var hasExportedAutomationRealDeviceEvidence = false
   private var memorySampler: QixiMemorySampler?
-  private var coreBackendEpoch: UInt64 = 0
-  private var coreRevision: UInt64 = 0
+  var coreBackendEpoch: UInt64 = 0
+  var coreRevision: UInt64 = 0
   private var coreCurrentRootID: UInt32 = 0
-  private var coreNextIntentID: UInt64 = 1
-  private var corePendingMutationCount = 0
-  private var coreMutationQueue: [QixiPendingCoreMutation] = []
-  private var coreMutationQueueHead = 0
-  private var coreMutationPumpTask: Task<Void, Never>?
-  private var backendTransitionOrder: [UInt64] = []
-  private var backendTransitionsByToken: [UInt64: QixiBackendTransition] = [:]
-  private var nextBackendTransitionToken: UInt64 = 1
-  private let blockingJobs = QixiBlockingJobCoordinator()
-  private var ioProgressPollTask: Task<Void, Never>?
+  private let coreMutationQueue = QixiCoreMutationQueue()
+  private let blockingSession = QixiBlockingSession()
   private var lifecycleCheckpointPending = false
   private var enteredBackgroundSinceLastForeground = false
-  private var coreQualityDeltaByVariationNodeID: [String: Double] = [:]
-  private var coreRootReferenceByVariationNodeID: [String: QixiCoreRootReference] = [
-    QixiViewModel.variationRootID: .node(0)
-  ]
 
-  private var coreBackendService: (any QixiCoreBackendService)? {
+  var coreBackendService: (any QixiCoreBackendService)? {
     analysisService as? any QixiCoreBackendService
   }
 
+  // Exposed for QixiCoreMutationHost
+  var analysisServiceForHost: any QixiAnalysisService { analysisService }
+
   var isBackendInteractionBlocked: Bool {
-    activeBlockingJob != nil || backendTransition != nil
+    blockingSession.isBlocked
   }
 
   @discardableResult
   private func beginBackendTransition(_ transition: QixiBackendTransition) -> UInt64 {
-    let token = nextBackendTransitionToken
-    nextBackendTransitionToken &+= 1
-    precondition(nextBackendTransitionToken != 0, "backend transition token overflow")
-    backendTransitionOrder.append(token)
-    backendTransitionsByToken[token] = transition
-    backendTransition = transition
-    activeBlockingJob = QixiBlockingJob(
-      id: token,
-      kind: transition.jobKind,
-      title: QixiBlockingJob.title(for: transition.jobKind),
-      phase: transition.statusText,
-      fraction: nil,
-      detail: nil,
-      blocks: QixiBlockingJob.blocks(for: transition.jobKind)
-    )
+    let token = blockingSession.begin(transition)
+    backendTransition = blockingSession.backendTransition
+    activeBlockingJob = blockingSession.activeBlockingJob
     return token
   }
 
@@ -300,90 +241,28 @@ final class QixiViewModel: ObservableObject {
     fraction: Double? = nil,
     detail: String? = nil
   ) {
-    guard let token, backendTransitionsByToken[token] != nil else { return }
-    guard var job = activeBlockingJob, job.id == token else { return }
-    if let phase { job.phase = phase }
-    if let fraction { job.fraction = min(1.0, max(0.0, fraction)) }
-    if let detail { job.detail = detail }
-    activeBlockingJob = job
+    blockingSession.update(token, phase: phase, fraction: fraction, detail: detail)
+    activeBlockingJob = blockingSession.activeBlockingJob
+    backendTransition = blockingSession.backendTransition
   }
 
   private func finishBackendTransition(_ token: UInt64?) {
-    guard let token, backendTransitionsByToken.removeValue(forKey: token) != nil else { return }
-    backendTransitionOrder.removeAll { $0 == token }
-    backendTransition = backendTransitionOrder.last.flatMap { backendTransitionsByToken[$0] }
-    stopIoProgressPolling()
-    if let remaining = backendTransitionOrder.last,
-       let kind = backendTransitionsByToken[remaining] {
-      activeBlockingJob = QixiBlockingJob(
-        id: remaining,
-        kind: kind.jobKind,
-        title: QixiBlockingJob.title(for: kind.jobKind),
-        phase: kind.statusText,
-        fraction: nil,
-        detail: nil,
-        blocks: QixiBlockingJob.blocks(for: kind.jobKind)
-      )
-    } else {
-      activeBlockingJob = nil
-    }
+    blockingSession.finish(token)
+    activeBlockingJob = blockingSession.activeBlockingJob
+    backendTransition = blockingSession.backendTransition
   }
 
   private func startIoProgressPolling(for token: UInt64) {
-    stopIoProgressPolling()
-    guard analysisService is NativeKataGoAnalysisService else { return }
-    ioProgressPollTask = Task { [weak self] in
-      while !Task.isCancelled {
-        guard let self else { return }
-        guard self.backendTransitionsByToken[token] != nil else { return }
-        if let progress = try? await (self.analysisService as? NativeKataGoAnalysisService)?.coreIoProgress() {
-          await MainActor.run {
-            guard self.backendTransitionsByToken[token] != nil else { return }
-            let phase = progress.phase.isEmpty ? (self.activeBlockingJob?.phase ?? "") : progress.phase
-            let fraction: Double?
-            if progress.active {
-              if progress.bytesTotal > 0 {
-                fraction = Double(progress.bytesDone) / Double(progress.bytesTotal)
-              } else if progress.fraction > 0 {
-                fraction = progress.fraction
-              } else {
-                fraction = nil
-              }
-            } else {
-              fraction = nil
-            }
-            let detail: String?
-            if progress.bytesTotal > 0 {
-              detail = Self.formatByteProgress(done: progress.bytesDone, total: progress.bytesTotal)
-            } else if !progress.message.isEmpty {
-              detail = progress.message
-            } else {
-              detail = nil
-            }
-            self.updateBackendTransitionProgress(
-              token,
-              phase: progress.active ? phase : nil,
-              fraction: fraction,
-              detail: detail
-            )
-          }
-        }
-        try? await Task.sleep(nanoseconds: 100_000_000)
-      }
+    guard let service = analysisService as? NativeKataGoAnalysisService else { return }
+    blockingSession.startIoProgressPolling(for: token, service: service) { [weak self] token, phase, fraction, detail in
+      self?.updateBackendTransitionProgress(token, phase: phase, fraction: fraction, detail: detail)
     }
   }
 
   private func stopIoProgressPolling() {
-    ioProgressPollTask?.cancel()
-    ioProgressPollTask = nil
+    blockingSession.stopIoProgressPolling()
   }
 
-  private static func formatByteProgress(done: UInt64, total: UInt64) -> String {
-    func mb(_ value: UInt64) -> String {
-      String(format: "%.1f MB", Double(value) / (1024.0 * 1024.0))
-    }
-    return "\(mb(done)) / \(mb(total))"
-  }
 
   init(analysisService: (any QixiAnalysisService)? = nil) {
     let processEnvironment = ProcessInfo.processInfo.environment
@@ -474,7 +353,6 @@ final class QixiViewModel: ObservableObject {
   deinit {
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
-    coreMutationPumpTask?.cancel()
     saveTask?.cancel()
     syncTask?.cancel()
     engineTombstoneTask?.cancel()
@@ -529,167 +407,56 @@ final class QixiViewModel: ObservableObject {
   }
 
   var variationTree: VariationTree {
-    let orderedRecords = variationRecords.values.sorted {
-      if $0.ply != $1.ply { return $0.ply < $1.ply }
-      if $0.lane != $1.lane { return $0.lane < $1.lane }
-      return $0.id < $1.id
-    }
-    let nodes = orderedRecords.map { record in
-      VariationNode(
-        id: record.id,
-        ply: record.ply,
-        lane: record.lane,
-        qualityDeltaPercent: variationQualityDelta(for: record),
-        isInitial: record.isInitial
-      )
-    }
-    let edges = orderedRecords.compactMap { record -> VariationEdge? in
-      guard let parentID = record.parentID else { return nil }
-      return VariationEdge(from: parentID, to: record.id)
-    }
-    return VariationTree(nodes: nodes, edges: edges, currentNodeID: currentVariationNodeID)
+    variation.variationTree(qualityDelta: { [self] record in
+      variationQualityDelta(for: record)
+    })
   }
 
   private func resetVariationTree(from moves: [BoardMove], currentPly: Int) {
-    coreQualityDeltaByVariationNodeID = [:]
-    variationRecords = [
-      Self.variationRootID: QixiVariationNodeRecord(
-        id: Self.variationRootID,
-        parentID: nil,
-        move: nil,
-        ply: 0,
-        lane: 0,
-        isInitial: true
-      )
-    ]
-    variationChildIDsByParent = [Self.variationRootID: []]
-    currentVariationNodeID = Self.variationRootID
-    currentVariationPathNodeIDs = [Self.variationRootID]
-    nextVariationNodeSequence = 1
-
-    var parentID = Self.variationRootID
-    var nodeAtCurrentPly = Self.variationRootID
-    var fullPath = [Self.variationRootID]
-    for (index, move) in moves.enumerated() {
-      let nodeID = makeVariationNodeID()
-      let ply = index + 1
-      let record = QixiVariationNodeRecord(
-        id: nodeID,
-        parentID: parentID,
-        move: move,
-        ply: ply,
-        lane: 0,
-        isInitial: false
-      )
-      variationRecords[nodeID] = record
-      variationChildIDsByParent[parentID, default: []].append(nodeID)
-      variationChildIDsByParent[nodeID] = []
-      parentID = nodeID
-      fullPath.append(nodeID)
-      if ply <= currentPly {
-        nodeAtCurrentPly = nodeID
-      }
-    }
-    currentVariationPathNodeIDs = fullPath
-    currentVariationNodeID = nodeAtCurrentPly
+    variation.reset(from: moves, currentPly: currentPly)
   }
 
   private func makeVariationNodeID() -> String {
-    defer { nextVariationNodeSequence += 1 }
-    return "v\(nextVariationNodeSequence)"
+    variation.makeNodeID()
   }
 
   private func variationPathNodeIDs(to nodeID: String) -> [String] {
-    var path: [String] = []
-    var cursor: String? = variationRecords[nodeID] == nil ? Self.variationRootID : nodeID
-    var visited = Set<String>()
-    while let id = cursor, visited.insert(id).inserted, let record = variationRecords[id] {
-      path.append(id)
-      cursor = record.parentID
-    }
-    return path.reversed()
+    variation.pathNodeIDs(to: nodeID)
   }
 
   private func variationMoves(to nodeID: String) -> [BoardMove] {
-    variationPathNodeIDs(to: nodeID).compactMap { variationRecords[$0]?.move }
+    variation.moves(to: nodeID)
   }
 
   private func variationPrimaryPathNodeIDs(from nodeID: String) -> [String] {
-    let boundedNodeID = variationRecords[nodeID] == nil ? Self.variationRootID : nodeID
-    var path = variationPathNodeIDs(to: boundedNodeID)
-    var cursor = boundedNodeID
-    var visited = Set(path)
-    while let childID = variationChildIDsByParent[cursor]?.first(where: { !visited.contains($0) }) {
-      path.append(childID)
-      visited.insert(childID)
-      cursor = childID
-    }
-    return path
+    variation.primaryPathNodeIDs(from: nodeID)
   }
 
   private func variationNodeID(onCurrentPathAt ply: Int) -> String {
-    let boundedPly = min(max(0, ply), mainLine.count)
-    guard boundedPly < currentVariationPathNodeIDs.count else {
-      return currentVariationPathNodeIDs.last ?? Self.variationRootID
-    }
-    return currentVariationPathNodeIDs[boundedPly]
+    variation.nodeID(onCurrentPathAt: ply, mainLineCount: mainLine.count)
   }
 
   private func syncCurrentLine(to nodeID: String, includePrimaryContinuation: Bool = false) {
-    let boundedNodeID = variationRecords[nodeID] == nil ? Self.variationRootID : nodeID
-    currentVariationNodeID = boundedNodeID
-    currentVariationPathNodeIDs = includePrimaryContinuation
-      ? variationPrimaryPathNodeIDs(from: boundedNodeID)
-      : variationPathNodeIDs(to: boundedNodeID)
-    mainLine = currentVariationPathNodeIDs.compactMap { variationRecords[$0]?.move }
-    currentPly = min(variationRecords[boundedNodeID]?.ply ?? 0, mainLine.count)
-  }
-
-  private func appendVariationMove(_ move: BoardMove) {
-    let parentID = variationNodeID(onCurrentPathAt: currentPly)
-    currentVariationNodeID = parentID
-    if let existingChild = variationChildIDsByParent[parentID]?.first(where: { childID in
-      variationRecords[childID]?.move == move
-    }) {
-      syncCurrentLine(to: existingChild, includePrimaryContinuation: true)
-      return
-    }
-
-    let parentLane = variationRecords[parentID]?.lane ?? 0
-    let childIDs = variationChildIDsByParent[parentID] ?? []
-    let lane = childIDs.isEmpty ? parentLane : nextAvailableVariationLane(preferredSign: childIDs.count.isMultiple(of: 2) ? -1 : 1)
-    let nodeID = makeVariationNodeID()
-    let record = QixiVariationNodeRecord(
-      id: nodeID,
-      parentID: parentID,
-      move: move,
-      ply: (variationRecords[parentID]?.ply ?? 0) + 1,
-      lane: lane,
-      isInitial: false
+    variation.syncCurrentLine(
+      to: nodeID,
+      includePrimaryContinuation: includePrimaryContinuation,
+      mainLine: &mainLine,
+      currentPly: &currentPly
     )
-    variationRecords[nodeID] = record
-    variationChildIDsByParent[parentID, default: []].append(nodeID)
-    variationChildIDsByParent[nodeID] = []
+  }
+
+  private func appendVariationMove(_ move: BoardMove) -> String {
+    let ply = (variation.records[variation.currentNodeID]?.ply ?? 0) + 1
+    let nodeID = variation.appendMove(move, atPly: ply)
     syncCurrentLine(to: nodeID)
+    return nodeID
   }
 
-  private func nextAvailableVariationLane(preferredSign: Int) -> Int {
-    let used = Set(variationRecords.values.map(\.lane))
-    var magnitude = 1
-    while true {
-      let primary = preferredSign >= 0 ? magnitude : -magnitude
-      if !used.contains(primary) { return primary }
-      let secondary = -primary
-      if !used.contains(secondary) { return secondary }
-      magnitude += 1
-    }
-  }
-
-  private func variationQualityDelta(for record: QixiVariationNodeRecord) -> Double? {
+  private func variationQualityDelta(for record: QixiVariationModel.NodeRecord) -> Double? {
     guard let move = record.move, !move.isPass, let x = move.x, let y = move.y else { return nil }
     guard selectedEngine != .none else { return nil }
     if coreBackendService != nil {
-      return coreQualityDeltaByVariationNodeID[record.id]
+      return variation.coreQualityDeltaByNodeID[record.id]
     }
     guard let parentID = record.parentID,
           let parentCache = cachedVariationAnalysis(for: parentID),
@@ -719,7 +486,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func variationMoveWinrateFromAnalyzedChild(
-    record: QixiVariationNodeRecord,
+    record: QixiVariationModel.NodeRecord,
     move: BoardMove
   ) -> Double? {
     let childMoves = variationMoves(to: record.id)
@@ -1094,7 +861,7 @@ final class QixiViewModel: ObservableObject {
     guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
     currentPly = min(max(0, currentPly + delta), mainLine.count)
-    currentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
+    variation.currentNodeID = variationNodeID(onCurrentPathAt: currentPly)
     clearBoardRecognitionPreview()
     if selectedEngine == .none {
       clearVisibleAnalysisAndRefreshAnchor()
@@ -1103,7 +870,7 @@ final class QixiViewModel: ObservableObject {
     }
     saveSoon(reason: "step")
     if coreBackendService != nil {
-      if let target = coreRootReferenceByVariationNodeID[currentVariationNodeID] {
+      if let target = variation.coreRootReferenceByNodeID[variation.currentNodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreStep")
       } else {
         let steps = abs(delta)
@@ -1122,7 +889,7 @@ final class QixiViewModel: ObservableObject {
     guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
     currentPly = min(max(0, ply), mainLine.count)
-    currentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
+    variation.currentNodeID = variationNodeID(onCurrentPathAt: currentPly)
     clearBoardRecognitionPreview()
     if selectedEngine == .none {
       clearVisibleAnalysisAndRefreshAnchor()
@@ -1131,7 +898,7 @@ final class QixiViewModel: ObservableObject {
     }
     saveSoon(reason: "jump")
     if coreBackendService != nil {
-      if let target = coreRootReferenceByVariationNodeID[currentVariationNodeID] {
+      if let target = variation.coreRootReferenceByNodeID[variation.currentNodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreJump")
       }
       return
@@ -1141,7 +908,7 @@ final class QixiViewModel: ObservableObject {
 
   func jump(toVariationNode nodeID: String) {
     guard !isBackendInteractionBlocked else { return }
-    guard variationRecords[nodeID] != nil else { return }
+    guard variation.records[nodeID] != nil else { return }
     invalidateActiveAnalysisForPositionChange()
     syncCurrentLine(to: nodeID, includePrimaryContinuation: true)
     clearBoardRecognitionPreview()
@@ -1152,7 +919,7 @@ final class QixiViewModel: ObservableObject {
     }
     saveSoon(reason: "variationJump")
     if coreBackendService != nil {
-      if let target = coreRootReferenceByVariationNodeID[nodeID] {
+      if let target = variation.coreRootReferenceByNodeID[nodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreVariationJump")
       }
       return
@@ -1164,11 +931,11 @@ final class QixiViewModel: ObservableObject {
     guard !isBackendInteractionBlocked else { return }
     invalidateActiveAnalysisForPositionChange()
     let parentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
-    let parentRoot = coreRootReferenceByVariationNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
+    let parentRoot = variation.coreRootReferenceByNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
     let intentID = nextCoreIntentID()
-    appendVariationMove(BoardMove(pass: nextColor))
-    let optimisticNodeID = currentVariationNodeID
-    coreRootReferenceByVariationNodeID[optimisticNodeID] = .intent(intentID)
+    _ = appendVariationMove(BoardMove(pass: nextColor))
+    let optimisticNodeID = variation.currentNodeID
+    variation.coreRootReferenceByNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
     saveSoon(reason: "passMove")
     if coreBackendService != nil {
@@ -1200,11 +967,11 @@ final class QixiViewModel: ObservableObject {
     ) else { return }
     invalidateActiveAnalysisForPositionChange()
     let parentVariationNodeID = variationNodeID(onCurrentPathAt: currentPly)
-    let parentRoot = coreRootReferenceByVariationNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
+    let parentRoot = variation.coreRootReferenceByNodeID[parentVariationNodeID] ?? .node(coreCurrentRootID)
     let intentID = nextCoreIntentID()
-    appendVariationMove(BoardMove(color: nextColor, x: x, y: y))
-    let optimisticNodeID = currentVariationNodeID
-    coreRootReferenceByVariationNodeID[optimisticNodeID] = .intent(intentID)
+    _ = appendVariationMove(BoardMove(color: nextColor, x: x, y: y))
+    let optimisticNodeID = variation.currentNodeID
+    variation.coreRootReferenceByNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
     saveSoon(reason: "play")
     if coreBackendService != nil {
@@ -1423,22 +1190,19 @@ final class QixiViewModel: ObservableObject {
     uiIntentID: UInt64? = nil,
     completion: (@MainActor (Bool) -> Void)? = nil
   ) {
-    guard let coreBackendService else {
+    guard coreBackendService != nil else {
       completion?(false)
       requestAnalysisIfNeeded()
       return
     }
-    coreMutationQueue.append(
-      QixiPendingCoreMutation(
-        operation: .request(request),
-        reason: reason,
-        optimisticVariationNodeID: optimisticVariationNodeID,
-        uiIntentID: uiIntentID,
-        completion: completion
-      )
+    coreMutationQueue.enqueueRequest(
+      request,
+      reason: reason,
+      host: self,
+      optimisticVariationNodeID: optimisticVariationNodeID,
+      uiIntentID: uiIntentID,
+      completion: completion
     )
-    corePendingMutationCount += 1
-    startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
   }
 
   private func submitCoreEngineSelection(
@@ -1446,43 +1210,20 @@ final class QixiViewModel: ObservableObject {
     reason: String,
     completion: (@MainActor (Bool) -> Void)? = nil
   ) {
-    guard let coreBackendService else {
+    guard coreBackendService != nil else {
       completion?(false)
       return
     }
-    coreMutationQueue.append(
-      QixiPendingCoreMutation(
-        operation: .selectEngine(engine),
-        reason: reason,
-        optimisticVariationNodeID: nil,
-        uiIntentID: nil,
-        completion: completion
-      )
-    )
-    corePendingMutationCount += 1
-    startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
-  }
-
-  private func startCoreMutationPumpIfNeeded(
-    coreBackendService: any QixiCoreBackendService
-  ) {
-    guard coreMutationPumpTask == nil else { return }
-    coreMutationPumpTask = Task { @MainActor [weak self, coreBackendService] in
-      guard let self else { return }
-      await self.runCoreMutationPump(coreBackendService: coreBackendService)
-    }
+    coreMutationQueue.enqueueEngineSelection(engine, reason: reason, host: self, completion: completion)
   }
 
   private func submitCoreMutationAndWait(
     _ request: QixiCoreRequest,
     reason: String
   ) async throws {
-    let succeeded = await withCheckedContinuation { continuation in
-      submitCoreMutation(request, reason: reason) { success in
-        continuation.resume(returning: success)
-      }
-    }
-    guard succeeded else {
+    do {
+      try await coreMutationQueue.submitAndWait(request, reason: reason, host: self)
+    } catch {
       throw QixiCoreBarrierError(operation: reason, backendMessage: lastEngineError)
     }
   }
@@ -1491,93 +1232,43 @@ final class QixiViewModel: ObservableObject {
     _ engine: AnalysisEngine,
     reason: String
   ) async throws {
-    let succeeded = await withCheckedContinuation { continuation in
-      submitCoreEngineSelection(engine, reason: reason) { success in
-        continuation.resume(returning: success)
-      }
-    }
-    guard succeeded else {
+    do {
+      try await coreMutationQueue.selectEngineAndWait(engine, reason: reason, host: self)
+    } catch {
       throw QixiCoreBarrierError(operation: reason, backendMessage: lastEngineError)
     }
   }
 
-  private func runCoreMutationPump(coreBackendService: any QixiCoreBackendService) async {
-    defer {
-      coreMutationPumpTask = nil
-      if coreMutationQueueHead >= coreMutationQueue.count {
-        coreMutationQueue.removeAll(keepingCapacity: true)
-        coreMutationQueueHead = 0
-      } else {
-        startCoreMutationPumpIfNeeded(coreBackendService: coreBackendService)
-      }
-    }
-    while coreMutationQueueHead < coreMutationQueue.count {
-      guard !Task.isCancelled else { return }
-      let pending = coreMutationQueue[coreMutationQueueHead]
-      coreMutationQueueHead += 1
-      do {
-        let result: QixiCoreBackendResult
-        switch pending.operation {
-        case .request(let queuedRequest):
-          let request = queuedRequest.replacingExpectedBackendEpoch(coreBackendEpoch)
-          result = try await coreBackendService.submitCoreRequest(request)
-        case .selectEngine(let engine):
-          let status = try await analysisService.setEngine(engine)
-          recordRuntimeDiagnostic(
-            event: "coreBackendSetEngine",
-            success: true,
-            message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state)"
-          )
-          result = try await coreBackendService.latestCoreSnapshot()
-        }
-        corePendingMutationCount = max(0, corePendingMutationCount - 1)
-        if !result.ok {
-          await recoverFromCoreMutationFailure(
-            message: result.message,
-            coreBackendService: coreBackendService
-          )
-          pending.completion?(false)
-          return
-        }
-        if let intentID = pending.uiIntentID,
-           result.committedUiIntentId == intentID,
-           let optimisticNodeID = pending.optimisticVariationNodeID {
-          coreRootReferenceByVariationNodeID[optimisticNodeID] = result.snapshot.map {
-            .lineage($0.rootLineageHash)
-          } ?? .node(result.currentRoot)
-        }
-        applyCoreBackendResult(result, reason: pending.reason, allowWhileMutationsPending: false)
-        saveSoon(reason: pending.reason)
-        pending.completion?(true)
-      } catch {
-        corePendingMutationCount = max(0, corePendingMutationCount - 1)
-        await recoverFromCoreMutationFailure(
-          message: localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed),
-          coreBackendService: coreBackendService
-        )
-        pending.completion?(false)
-        return
-      }
-    }
-    coreMutationQueue.removeAll(keepingCapacity: true)
-    coreMutationQueueHead = 0
+  func noteCoreMutationCommittedIntent(
+    uiIntentID: UInt64,
+    optimisticVariationNodeID: String,
+    result: QixiCoreBackendResult
+  ) {
+    variation.coreRootReferenceByNodeID[optimisticVariationNodeID] = result.snapshot.map {
+      .lineage($0.rootLineageHash)
+    } ?? .node(result.currentRoot)
   }
 
-  private func recoverFromCoreMutationFailure(
+  func noteCoreMutationSucceeded(reason: String) {
+    saveSoon(reason: reason)
+  }
+
+  func recordCoreRuntimeDiagnostic(event: String, success: Bool, message: String) {
+    recordRuntimeDiagnostic(event: event, success: success, message: message)
+  }
+
+  func recoverFromCoreMutationFailure(
     message: String,
-    coreBackendService: any QixiCoreBackendService
+    abandoned: [QixiPendingCoreMutation]
   ) async {
-    let abandoned = Array(coreMutationQueue[coreMutationQueueHead...])
-    corePendingMutationCount = max(0, corePendingMutationCount - abandoned.count)
-    coreMutationQueue.removeAll(keepingCapacity: true)
-    coreMutationQueueHead = 0
     for pending in abandoned {
       pending.completion?(false)
     }
     lastEngineError = message
     hermesStatus = .offline
     recordRuntimeDiagnostic(event: "coreMutationFailed", success: false, message: message)
-    if let result = try? await coreBackendService.latestCoreSnapshot() {
+    if let coreBackendService,
+       let result = try? await coreBackendService.latestCoreSnapshot() {
       applyCoreBackendResult(result, reason: "coreMutationRollback", allowWhileMutationsPending: true)
       lastEngineError = message
       hermesStatus = result.engineState == "ready" || result.engineState == "none" ? .ready : .offline
@@ -1779,7 +1470,7 @@ final class QixiViewModel: ObservableObject {
     analysisByEngine = [:]
     saveNow(reason: "newGame")
     if coreBackendService != nil {
-      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(.newGame(komi: komi, nextPla: .black, expectedBackendEpoch: 0), reason: "coreNewGame")
       return
     }
@@ -1801,7 +1492,7 @@ final class QixiViewModel: ObservableObject {
     refreshLocalChartAnchor()
     saveNow(reason: "sgfImport")
     if coreBackendService != nil {
-      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(
         .newGame(komi: komi, nextPla: importedMoves.first?.color ?? .black, expectedBackendEpoch: 0),
         reason: "coreSGFImportReset"
@@ -1809,8 +1500,8 @@ final class QixiViewModel: ObservableObject {
       var parent: QixiCoreRootReference = .node(0)
       for (index, move) in importedMoves.enumerated() {
         let intentID = nextCoreIntentID()
-        let nodeID = currentVariationPathNodeIDs[index + 1]
-        coreRootReferenceByVariationNodeID[nodeID] = .intent(intentID)
+        let nodeID = variation.currentPathNodeIDs[index + 1]
+        variation.coreRootReferenceByNodeID[nodeID] = .intent(intentID)
         let coreMove = move.isPass
           ? 361
           : coreMoveIndex(x: move.x ?? -1, y: move.y ?? -1)
@@ -1927,9 +1618,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func waitForCoreMutationDrain() async {
-    while let task = coreMutationPumpTask {
-      await task.value
-    }
+    await coreMutationQueue.waitForDrain()
   }
 
   func importMCTSStatePackage(from packageURL: URL) async throws {
@@ -2195,7 +1884,7 @@ final class QixiViewModel: ObservableObject {
     clearVisibleAnalysisAndRefreshAnchor()
     saveSoon(reason: "boardRecognitionApplied")
     if coreBackendService != nil {
-      coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+      variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(
         .applyRecognizedBoard(
           setupStones: setupStones,
@@ -2348,7 +2037,7 @@ final class QixiViewModel: ObservableObject {
     return true
   }
 
-  private func applyCoreBackendResult(
+  func applyCoreBackendResult(
     _ result: QixiCoreBackendResult,
     reason: String,
     allowWhileMutationsPending: Bool
@@ -2357,7 +2046,7 @@ final class QixiViewModel: ObservableObject {
        (result.backendEpoch == coreBackendEpoch && result.revision < coreRevision) {
       return
     }
-    let deferSnapshot = !allowWhileMutationsPending && corePendingMutationCount > 0
+    let deferSnapshot = !allowWhileMutationsPending && coreMutationQueue.pendingCount > 0
     coreBackendEpoch = result.backendEpoch
     coreRevision = result.revision
     coreCurrentRootID = result.currentRoot
@@ -2419,65 +2108,11 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func rebuildVariationTree(from snapshot: QixiCoreSnapshot) {
-    guard !snapshot.visibleTree.isEmpty else { return }
-    var records: [String: QixiVariationNodeRecord] = [:]
-    var childIDsByParent: [String: [String]] = [:]
-    var laneByNode: [UInt32: Int] = [:]
-    // Light snapshots already cap size; still bound layout cost on main thread.
-    let maxLayoutNodes = 4096
-    let orderedNodes = snapshot.visibleTree
-      .prefix(maxLayoutNodes)
-      .sorted {
-      if $0.ply != $1.ply { return $0.ply < $1.ply }
-      return $0.id < $1.id
-    }
-    let variationIDByCoreNodeID = Dictionary(
-      uniqueKeysWithValues: orderedNodes.map { ($0.id, coreVariationNodeID($0.lineageHash)) }
-    )
-    for node in orderedNodes {
-      let nodeID = coreVariationNodeID(node.lineageHash)
-      let parentID = node.parent.flatMap { variationIDByCoreNodeID[$0] }
-      let siblingIndex = parentID.flatMap { childIDsByParent[$0]?.count } ?? 0
-      let parentLane = node.parent.flatMap { laneByNode[$0] } ?? 0
-      let lane = node.parent == nil
-        ? 0
-        : (siblingIndex == 0 ? parentLane : parentLane + (siblingIndex.isMultiple(of: 2) ? -siblingIndex : siblingIndex))
-      let move = boardMove(fromCoreMove: node.moveFromParent, color: node.moveColor)
-      records[nodeID] = QixiVariationNodeRecord(
-        id: nodeID,
-        parentID: parentID,
-        move: move,
-        ply: Int(node.ply),
-        lane: lane,
-        isInitial: node.parent == nil
-      )
-      if childIDsByParent[nodeID] == nil {
-        childIDsByParent[nodeID] = []
-      }
-      if let parentID {
-        childIDsByParent[parentID, default: []].append(nodeID)
-      }
-      laneByNode[node.id] = lane
-    }
-    let currentNodeID = coreVariationNodeID(snapshot.rootLineageHash)
-    guard records[currentNodeID] != nil else { return }
-    variationRecords = records
-    variationChildIDsByParent = childIDsByParent
-    coreRootReferenceByVariationNodeID = Dictionary(
-      uniqueKeysWithValues: orderedNodes.map {
-        (coreVariationNodeID($0.lineageHash), .lineage($0.lineageHash))
-      }
-    )
-    coreQualityDeltaByVariationNodeID = Dictionary(
-      uniqueKeysWithValues: orderedNodes.compactMap { node in
-        node.qualityDeltaPercent.map { (coreVariationNodeID(node.lineageHash), $0) }
-      }
-    )
-    currentVariationNodeID = currentNodeID
-    currentVariationPathNodeIDs = variationPathNodeIDs(to: currentVariationNodeID)
-    mainLine = currentVariationPathNodeIDs.compactMap { variationRecords[$0]?.move }
-    currentPly = min(variationRecords[currentVariationNodeID]?.ply ?? 0, mainLine.count)
-    nextVariationNodeSequence = max(nextVariationNodeSequence, records.count + 1)
+    variation.rebuild(from: snapshot, boardMove: { move, color in
+      boardMove(fromCoreMove: move, color: color)
+    })
+    mainLine = variation.currentPathNodeIDs.compactMap { variation.records[$0]?.move }
+    currentPly = min(variation.records[variation.currentNodeID]?.ply ?? 0, mainLine.count)
   }
 
   private func coreVariationNodeID(_ lineageHash: UInt64) -> String {
@@ -2582,8 +2217,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func nextCoreIntentID() -> UInt64 {
-    defer { coreNextIntentID += 1 }
-    return coreNextIntentID
+    coreMutationQueue.allocateIntentID()
   }
 
   private func coreMoveIndex(x: Int, y: Int) -> Int {
@@ -2674,7 +2308,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   private func enqueueCurrentMainLineIntoCore(reason: String) {
-    coreRootReferenceByVariationNodeID = [Self.variationRootID: .node(0)]
+    variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
     submitCoreMutation(
       .newGame(
         komi: komi,
@@ -2685,10 +2319,10 @@ final class QixiViewModel: ObservableObject {
     )
     var parent: QixiCoreRootReference = .node(0)
     for (index, move) in mainLine.enumerated() {
-      guard index + 1 < currentVariationPathNodeIDs.count else { break }
+      guard index + 1 < variation.currentPathNodeIDs.count else { break }
       let intentID = nextCoreIntentID()
-      let nodeID = currentVariationPathNodeIDs[index + 1]
-      coreRootReferenceByVariationNodeID[nodeID] = .intent(intentID)
+      let nodeID = variation.currentPathNodeIDs[index + 1]
+      variation.coreRootReferenceByNodeID[nodeID] = .intent(intentID)
       let coreMove = move.isPass
         ? 361
         : coreMoveIndex(x: move.x ?? -1, y: move.y ?? -1)

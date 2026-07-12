@@ -28,9 +28,21 @@ Last updated: 2026-07-12
   progress during MCTS package import/export.
 - Variation layout still bounded at 4096 nodes on the main thread.
 
+## ViewModel split (landed)
+
+`QixiViewModel` remains the main-page `ObservableObject` façade (views unchanged).
+Logic extracted into:
+
+| Module | Role |
+| --- | --- |
+| `QixiVariationModel` | Variation tree projection / rebuild from light snapshots |
+| `QixiBlockingSession` | Blocking jobs + I/O progress polling |
+| `QixiCoreMutationQueue` | FIFO core mutations / engine selection pump |
+| `QixiBlockingJob` | Progress chrome model (existing) |
+
 ## Not yet done (next slices)
 
-- Full split of `QixiViewModel` into session/controller modules.
+- Further slimming: analysis cache module, persistence coordinator, feature plugins.
 - Streaming deserialize / true byte-progress during parse.
 - Incremental variation projection (diff apply).
 - OOM unload policy wired to memory pressure.

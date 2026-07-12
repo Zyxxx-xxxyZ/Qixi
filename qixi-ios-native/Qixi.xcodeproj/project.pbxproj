@@ -13,6 +13,9 @@
 		100000000000000000000104 /* BackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000204 /* BackendClient.swift */; };
 		100000000000000000000105 /* QixiViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000205 /* QixiViewModel.swift */; };
 		10000000000000000000015A /* QixiBlockingJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025A /* QixiBlockingJob.swift */; };
+		10000000000000000000015D /* QixiCoreMutationQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025D /* QixiCoreMutationQueue.swift */; };
+		10000000000000000000015C /* QixiBlockingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025C /* QixiBlockingSession.swift */; };
+		10000000000000000000015B /* QixiVariationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025B /* QixiVariationModel.swift */; };
 		100000000000000000000106 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* RootView.swift */; };
 		100000000000000000000107 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* BoardView.swift */; };
 		100000000000000000000108 /* LeftAnalysisPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000208 /* LeftAnalysisPane.swift */; };
@@ -63,6 +66,9 @@
 		100000000000000000000204 /* BackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendClient.swift; sourceTree = "<group>"; };
 		100000000000000000000205 /* QixiViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiViewModel.swift; sourceTree = "<group>"; };
 		10000000000000000000025A /* QixiBlockingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiBlockingJob.swift; sourceTree = "<group>"; };
+		10000000000000000000025D /* QixiCoreMutationQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiCoreMutationQueue.swift; sourceTree = "<group>"; };
+		10000000000000000000025C /* QixiBlockingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiBlockingSession.swift; sourceTree = "<group>"; };
+		10000000000000000000025B /* QixiVariationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiVariationModel.swift; sourceTree = "<group>"; };
 		100000000000000000000206 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		100000000000000000000207 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
 		100000000000000000000208 /* LeftAnalysisPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftAnalysisPane.swift; sourceTree = "<group>"; };
@@ -165,6 +171,9 @@
 				10000000000000000000021D /* Qixi-Bridging-Header.h */,
 				100000000000000000000205 /* QixiViewModel.swift */,
 				10000000000000000000025A /* QixiBlockingJob.swift */,
+				10000000000000000000025D /* QixiCoreMutationQueue.swift */,
+				10000000000000000000025C /* QixiBlockingSession.swift */,
+				10000000000000000000025B /* QixiVariationModel.swift */,
 				100000000000000000000206 /* RootView.swift */,
 				100000000000000000000207 /* BoardView.swift */,
 				100000000000000000000208 /* LeftAnalysisPane.swift */,
@@ -311,6 +320,9 @@
 				100000000000000000000104 /* BackendClient.swift in Sources */,
 				100000000000000000000105 /* QixiViewModel.swift in Sources */,
 				10000000000000000000015A /* QixiBlockingJob.swift in Sources */,
+				10000000000000000000015D /* QixiCoreMutationQueue.swift in Sources */,
+				10000000000000000000015C /* QixiBlockingSession.swift in Sources */,
+				10000000000000000000015B /* QixiVariationModel.swift in Sources */,
 				100000000000000000000106 /* RootView.swift in Sources */,
 				100000000000000000000107 /* BoardView.swift in Sources */,
 				100000000000000000000108 /* LeftAnalysisPane.swift in Sources */,
