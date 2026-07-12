@@ -560,10 +560,17 @@ extension QixiRuntimeConfig {
       .replacingOccurrences(of: "_", with: "")
       .replacingOccurrences(of: " ", with: "")
     switch normalized {
+    #if !QIXI_NATIVE_RELEASE
     case "http", "httpbridge", "machosted", "machostedhttp":
       return .httpBridge
     case "native", "nativeinprocess", "inprocess", "ipadnative":
       return .nativeInProcess
+    #else
+    // Product builds only expose nativeInProcess; map legacy HTTP labels to native.
+    case "http", "httpbridge", "machosted", "machostedhttp",
+         "native", "nativeinprocess", "inprocess", "ipadnative":
+      return .nativeInProcess
+    #endif
     default:
       return nil
     }
@@ -579,7 +586,11 @@ enum QixiAnalysisServiceFactory {
     // Product analysis is always NativeKataGoAnalysisService (core::MCTSStore + NN).
     // HTTP bridge is not constructed by the app target.
     switch runtime {
-    case .httpBridge, .nativeInProcess:
+    #if !QIXI_NATIVE_RELEASE
+    case .httpBridge:
+      return NativeKataGoAnalysisService()
+    #endif
+    case .nativeInProcess:
       return NativeKataGoAnalysisService()
     }
   }
