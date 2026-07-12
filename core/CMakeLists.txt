@@ -81,6 +81,12 @@ add_executable(qixi_policy_only_selection_prod_guard
 # Production core must refuse to enable the test mode.
 target_link_libraries(qixi_policy_only_selection_prod_guard PRIVATE qixi_core)
 
+add_executable(qixi_stream_deserialize
+  tests/qixi_stream_deserialize.cpp
+)
+
+target_link_libraries(qixi_stream_deserialize PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
@@ -91,3 +97,4 @@ add_test(NAME qixi_min_root_depth_visits COMMAND qixi_min_root_depth_visits)
 add_test(NAME qixi_split_backup COMMAND qixi_split_backup)
 add_test(NAME qixi_policy_only_selection COMMAND qixi_policy_only_selection)
 add_test(NAME qixi_policy_only_selection_prod_guard COMMAND qixi_policy_only_selection_prod_guard)
+add_test(NAME qixi_stream_deserialize COMMAND qixi_stream_deserialize)

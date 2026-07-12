@@ -3,11 +3,15 @@
 #include "qixi/board.hpp"
 
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <random>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace qixi::core {
 
@@ -245,7 +249,37 @@ public:
   bool mergeVisibleRecordFrom(const MCTSStore& source, std::string* error);
 
   std::vector<uint8_t> serialize() const;
-  static std::optional<MCTSStore> deserialize(const std::vector<uint8_t>& bytes, std::string* error);
+
+  /// Progress for long deserialize / file load. `fraction` is overall 0..1.
+  /// `phase` is a stable token: reading | verifying | parsing_header |
+  /// parsing_nodes | parsing_actions | parsing_arenas | validating | complete.
+  struct DeserializeProgress {
+    std::string phase;
+    double fraction = 0.0;
+    uint64_t unitsDone = 0;
+    uint64_t unitsTotal = 0;
+    std::string message;
+  };
+  using DeserializeProgressFn = std::function<void(const DeserializeProgress&)>;
+
+  static std::optional<MCTSStore> deserialize(
+    const std::vector<uint8_t>& bytes,
+    std::string* error,
+    const DeserializeProgressFn& progress = {}
+  );
+  static std::optional<MCTSStore> deserialize(
+    const uint8_t* data,
+    size_t size,
+    std::string* error,
+    const DeserializeProgressFn& progress = {}
+  );
+  /// Stream-friendly file load: chunked read or mmap, with true read/verify/parse progress.
+  static std::optional<MCTSStore> deserializeFromFile(
+    const std::string& path,
+    uint64_t maxBytes,
+    std::string* error,
+    const DeserializeProgressFn& progress = {}
+  );
 
   const std::vector<Node>& nodeArray() const { return nodes; }
   const std::vector<Action>& actionArray() const { return actions; }

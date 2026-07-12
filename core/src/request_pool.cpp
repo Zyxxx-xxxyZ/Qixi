@@ -90,6 +90,53 @@ bool readFile(
   return true;
 }
 
+bool peekFilePrefix(
+  const std::string& path,
+  size_t maxPrefix,
+  std::vector<uint8_t>& bytes,
+  std::string& error,
+  uint64_t maxFileBytes = kMaxCoreStateBytes
+) {
+  int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  const int fd = open(path.c_str(), flags);
+  if(fd < 0) {
+    error = "could not open file for reading: " + path;
+    return false;
+  }
+  struct stat metadata;
+  if(fstat(fd, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_size < 0 ||
+     static_cast<uint64_t>(metadata.st_size) > maxFileBytes) {
+    close(fd);
+    error = "file is not a bounded regular file: " + path;
+    return false;
+  }
+  const size_t toRead = std::min(maxPrefix, static_cast<size_t>(metadata.st_size));
+  bytes.resize(toRead);
+  size_t offset = 0;
+  while(offset < bytes.size()) {
+    const ssize_t count = read(fd, bytes.data() + offset, bytes.size() - offset);
+    if(count < 0 && errno == EINTR)
+      continue;
+    if(count <= 0) {
+      close(fd);
+      error = "could not peek file: " + path;
+      return false;
+    }
+    offset += static_cast<size_t>(count);
+  }
+  if(close(fd) != 0) {
+    error = "could not close file after peek: " + path;
+    return false;
+  }
+  return true;
+}
+
 bool syncParentDirectory(const std::string& path, std::string& error) {
   std::filesystem::path parent = std::filesystem::path(path).parent_path();
   if(parent.empty())
@@ -781,10 +828,9 @@ std::optional<MCTSStore> BackendWorker::loadStore(const AnalysisKey& analysisKey
   const std::string path = storePath(analysisKey);
   if(path.empty() || !std::filesystem::exists(path))
     return std::nullopt;
-  std::vector<uint8_t> bytes;
-  if(!readFile(path, bytes, error))
-    return std::nullopt;
-  auto loaded = MCTSStore::deserialize(bytes, &error);
+  // const method: progress updates go through mutable mutex (setIoProgress is non-const).
+  // Use silent deserializeFromFile for const loads; boot path can call import with progress.
+  auto loaded = MCTSStore::deserializeFromFile(path, kMaxCoreStateBytes, &error);
   if(loaded && !(loaded->analysisKey() == analysisKey)) {
     error = "store file analysis key does not match its requested key";
     return std::nullopt;
@@ -810,10 +856,7 @@ std::optional<MCTSStore> BackendWorker::loadActiveStore(std::string& error) cons
     return std::nullopt;
   }
   const std::string path = (std::filesystem::path(ctx.storeDirectory) / filename).string();
-  std::vector<uint8_t> bytes;
-  if(!readFile(path, bytes, error))
-    return std::nullopt;
-  return MCTSStore::deserialize(bytes, &error);
+  return MCTSStore::deserializeFromFile(path, kMaxCoreStateBytes, &error);
 }
 
 bool BackendWorker::prepareTargetStore(
@@ -1320,20 +1363,30 @@ BackendResult BackendWorker::handleSetTerritoryMode(const FrontendRequest& reque
 }
 
 BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& request, const ImportAnalysisStateRequest& payload) {
-  setIoProgress(true, "reading", 0.05, 0, 0, "Reading MCTS state");
-  std::vector<uint8_t> bytes;
+  setIoProgress(true, "reading", 0.02, 0, 0, "Reading MCTS state");
   std::string error;
-  if(!readFile(payload.path, bytes, error)) {
+  auto progressCb = [this](const MCTSStore::DeserializeProgress& p) {
+    setIoProgress(true, p.phase, p.fraction, p.unitsDone, p.unitsTotal, p.message);
+  };
+
+  // Peek magic with a small prefix read to choose bundle vs single-store path.
+  std::vector<uint8_t> magicBytes;
+  if(!peekFilePrefix(payload.path, 16, magicBytes, error)) {
     clearIoProgress();
     return baseResult(request, false, error);
   }
-  setIoProgress(true, "parsing", 0.30, bytes.size(), bytes.size(), "Parsing MCTS state");
 
   std::optional<MCTSStore> loaded;
   std::vector<StoreBundleEntry> bundleEntries;
   std::string activeFilename;
   const GameId importedGameId = ctx.nextGameId;
-  if(hasStoreBundleMagic(bytes)) {
+  std::vector<uint8_t> bytes;
+  if(hasStoreBundleMagic(magicBytes)) {
+    if(!readFile(payload.path, bytes, error)) {
+      clearIoProgress();
+      return baseResult(request, false, error);
+    }
+    setIoProgress(true, "parsing", 0.25, bytes.size(), bytes.size(), "Parsing store bundle");
     if(!parseStoreBundle(bytes, activeFilename, bundleEntries, error)) {
       clearIoProgress();
       return baseResult(request, false, error);
@@ -1349,17 +1402,25 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
     for(StoreBundleEntry& entry : bundleEntries) {
       std::string decodeError;
       auto decoded = MCTSStore::deserialize(entry.bytes, &decodeError);
-      if(!decoded)
+      if(!decoded) {
+        clearIoProgress();
         return baseResult(request, false, "bundle store is invalid: " + decodeError);
+      }
       const std::string canonical = std::filesystem::path(storePath(decoded->analysisKey())).filename().string();
-      if(canonical != entry.filename)
+      if(canonical != entry.filename) {
+        clearIoProgress();
         return baseResult(request, false, "bundle store filename does not match its analysis key");
+      }
       if(bundleGameId == 0)
         bundleGameId = decoded->analysisKey().gameId;
-      else if(decoded->analysisKey().gameId != bundleGameId)
+      else if(decoded->analysisKey().gameId != bundleGameId) {
+        clearIoProgress();
         return baseResult(request, false, "bundle contains stores from multiple games");
-      if(!analysisKeys.insert(keyString(decoded->analysisKey())).second)
+      }
+      if(!analysisKeys.insert(keyString(decoded->analysisKey())).second) {
+        clearIoProgress();
         return baseResult(request, false, "bundle contains duplicate analysis keys");
+      }
     }
 
     std::string importedActiveFilename;
@@ -1367,38 +1428,51 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
       const bool isActive = entry.filename == activeFilename;
       std::string decodeError;
       auto decoded = MCTSStore::deserialize(entry.bytes, &decodeError);
-      if(!decoded)
+      if(!decoded) {
+        clearIoProgress();
         return baseResult(request, false, "bundle store changed during validation: " + decodeError);
+      }
       std::vector<uint8_t>().swap(entry.bytes);
       decoded->assignImportedGameId(importedGameId);
       entry.filename =
         std::filesystem::path(storePath(decoded->analysisKey())).filename().string();
       entry.bytes = decoded->serialize();
-      if(entry.bytes.empty())
+      if(entry.bytes.empty()) {
+        clearIoProgress();
         return baseResult(request, false, "imported bundle store exceeds the core-state byte limit");
+      }
       if(isActive) {
         importedActiveFilename = entry.filename;
         loaded = std::move(decoded);
       }
     }
     activeFilename = importedActiveFilename;
-    if(!loaded)
+    if(!loaded) {
+      clearIoProgress();
       return baseResult(request, false, "bundle active store could not be decoded");
+    }
   }
   else {
-    loaded = MCTSStore::deserialize(bytes, &error);
-    if(!loaded)
+    // Single-store product path: mmap/chunked load with true parse progress.
+    loaded = MCTSStore::deserializeFromFile(payload.path, kMaxCoreStateBytes, &error, progressCb);
+    if(!loaded) {
+      clearIoProgress();
       return baseResult(request, false, error);
+    }
     loaded->assignImportedGameId(importedGameId);
-    std::vector<uint8_t>().swap(bytes);
+    setIoProgress(true, "serializing", 0.92, 0, 0, "Re-serializing imported store");
     bytes = loaded->serialize();
-    if(bytes.empty())
+    if(bytes.empty()) {
+      clearIoProgress();
       return baseResult(request, false, "imported store exceeds the core-state byte limit");
+    }
   }
 
   if(ctx.engineState == EngineState::ready &&
-     loaded->analysisKey().modelId != ctx.currentKey.modelId)
+     loaded->analysisKey().modelId != ctx.currentKey.modelId) {
+    clearIoProgress();
     return baseResult(request, false, "imported active state belongs to a different loaded model");
+  }
 
   std::vector<std::string> bundleDestinations;
   std::string singleDestination;

@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cerrno>
+#include <fcntl.h>
 #include <stdexcept>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <unordered_set>
 
 namespace qixi::core {
@@ -179,12 +184,15 @@ public:
 class ByteReader {
 public:
   explicit ByteReader(const std::vector<uint8_t>& data, size_t byteLimit)
-    : bytes(data), limit(std::min(byteLimit, data.size())) {}
+    : ptr(data.data()), limit(std::min(byteLimit, data.size())) {}
+
+  explicit ByteReader(const uint8_t* data, size_t byteLimit)
+    : ptr(data), limit(byteLimit) {}
 
   bool readU8(uint8_t& value) {
     if(offset + 1 > limit)
       return false;
-    value = bytes[offset++];
+    value = ptr[offset++];
     return true;
   }
 
@@ -227,7 +235,7 @@ public:
   bool readBytes(void* dst, size_t size) {
     if(offset + size > limit)
       return false;
-    std::memcpy(dst, bytes.data() + offset, size);
+    std::memcpy(dst, ptr + offset, size);
     offset += size;
     return true;
   }
@@ -240,20 +248,76 @@ public:
     return limit - offset;
   }
 
+  size_t position() const {
+    return offset;
+  }
+
+  size_t sizeLimit() const {
+    return limit;
+  }
+
 private:
   bool readUnsigned(size_t count, uint64_t& value) {
     if(count > 8 || offset + count > limit)
       return false;
     value = 0;
     for(size_t i = 0; i < count; ++i)
-      value |= static_cast<uint64_t>(bytes[offset++]) << (8 * i);
+      value |= static_cast<uint64_t>(ptr[offset++]) << (8 * i);
     return true;
   }
 
-  const std::vector<uint8_t>& bytes;
-  size_t limit;
+  const uint8_t* ptr = nullptr;
+  size_t limit = 0;
   size_t offset = 0;
 };
+
+void reportDeserializeProgress(
+  const MCTSStore::DeserializeProgressFn& progress,
+  const char* phase,
+  double fraction,
+  uint64_t unitsDone = 0,
+  uint64_t unitsTotal = 0,
+  const char* message = ""
+) {
+  if(!progress)
+    return;
+  MCTSStore::DeserializeProgress p;
+  p.phase = phase;
+  p.fraction = std::max(0.0, std::min(1.0, fraction));
+  p.unitsDone = unitsDone;
+  p.unitsTotal = unitsTotal;
+  p.message = message ? message : "";
+  progress(p);
+}
+
+uint64_t checksum64Progress(
+  const uint8_t* bytes,
+  size_t size,
+  const MCTSStore::DeserializeProgressFn& progress,
+  double fractionStart,
+  double fractionEnd
+) {
+  uint64_t hash = 1469598103934665603ULL;
+  constexpr size_t kReportEvery = 4ULL * 1024ULL * 1024ULL;
+  size_t nextReport = kReportEvery;
+  for(size_t i = 0; i < size; ++i) {
+    hash ^= bytes[i];
+    hash *= 1099511628211ULL;
+    if(progress && (i + 1 == size || i + 1 >= nextReport)) {
+      const double t = size == 0 ? 1.0 : static_cast<double>(i + 1) / static_cast<double>(size);
+      reportDeserializeProgress(
+        progress,
+        "verifying",
+        fractionStart + (fractionEnd - fractionStart) * t,
+        static_cast<uint64_t>(i + 1),
+        static_cast<uint64_t>(size),
+        "Verifying checksum"
+      );
+      nextReport = i + 1 + kReportEvery;
+    }
+  }
+  return hash;
+}
 
 // Raised from 512 MiB: policy-only oracle stress can grow multi-hundred-MiB trees.
 constexpr uint64_t kMaxSerializedBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
@@ -270,12 +334,16 @@ uint64_t checksum64(const uint8_t* bytes, size_t size) {
   return hash;
 }
 
-uint64_t decodeTrailingU64(const std::vector<uint8_t>& bytes) {
+uint64_t decodeTrailingU64(const uint8_t* bytes, size_t size) {
   uint64_t value = 0;
-  const size_t start = bytes.size() - sizeof(uint64_t);
+  const size_t start = size - sizeof(uint64_t);
   for(size_t i = 0; i < sizeof(uint64_t); ++i)
     value |= static_cast<uint64_t>(bytes[start + i]) << (8 * i);
   return value;
+}
+
+uint64_t decodeTrailingU64(const std::vector<uint8_t>& bytes) {
+  return decodeTrailingU64(bytes.data(), bytes.size());
 }
 
 } // namespace
@@ -1865,17 +1933,112 @@ std::vector<uint8_t> MCTSStore::serialize() const {
   return std::move(w.bytes);
 }
 
-std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& bytes, std::string* error) {
-  if(bytes.size() < 32 || bytes.size() > kMaxSerializedBytes) {
+std::optional<MCTSStore> MCTSStore::deserialize(
+  const std::vector<uint8_t>& bytes,
+  std::string* error,
+  const DeserializeProgressFn& progress
+) {
+  return deserialize(bytes.data(), bytes.size(), error, progress);
+}
+
+std::optional<MCTSStore> MCTSStore::deserializeFromFile(
+  const std::string& path,
+  uint64_t maxBytes,
+  std::string* error,
+  const DeserializeProgressFn& progress
+) {
+  int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  const int fd = open(path.c_str(), flags);
+  if(fd < 0) {
+    if(error) *error = "could not open store file: " + path;
+    return std::nullopt;
+  }
+  struct stat metadata;
+  if(fstat(fd, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_size < 0 ||
+     static_cast<uint64_t>(metadata.st_size) < 32 ||
+     static_cast<uint64_t>(metadata.st_size) > maxBytes ||
+     static_cast<uint64_t>(metadata.st_size) > kMaxSerializedBytes) {
+    close(fd);
+    if(error) *error = "store file is not a bounded regular file: " + path;
+    return std::nullopt;
+  }
+  const size_t fileSize = static_cast<size_t>(metadata.st_size);
+  reportDeserializeProgress(progress, "reading", 0.02, 0, fileSize, "Opening store file");
+
+  // Prefer mmap to avoid a second full copy of huge stores.
+  void* mapped = mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0);
+  if(mapped != MAP_FAILED) {
+    close(fd);
+#ifdef MADV_SEQUENTIAL
+    (void)madvise(mapped, fileSize, MADV_SEQUENTIAL);
+#endif
+    reportDeserializeProgress(progress, "reading", 0.35, fileSize, fileSize, "Mapped store file");
+    auto store = deserialize(
+      static_cast<const uint8_t*>(mapped),
+      fileSize,
+      error,
+      progress
+    );
+    munmap(mapped, fileSize);
+    return store;
+  }
+
+  // Fallback: chunked read with true byte progress.
+  std::vector<uint8_t> bytes;
+  bytes.resize(fileSize);
+  size_t offset = 0;
+  constexpr size_t kChunk = 1024ULL * 1024ULL;
+  while(offset < bytes.size()) {
+    const size_t want = std::min(kChunk, bytes.size() - offset);
+    const ssize_t count = read(fd, bytes.data() + offset, want);
+    if(count < 0 && errno == EINTR)
+      continue;
+    if(count <= 0) {
+      close(fd);
+      if(error) *error = "could not read complete store file: " + path;
+      return std::nullopt;
+    }
+    offset += static_cast<size_t>(count);
+    reportDeserializeProgress(
+      progress,
+      "reading",
+      0.02 + 0.33 * (static_cast<double>(offset) / static_cast<double>(fileSize)),
+      static_cast<uint64_t>(offset),
+      static_cast<uint64_t>(fileSize),
+      "Reading store file"
+    );
+  }
+  if(close(fd) != 0) {
+    if(error) *error = "could not close store file: " + path;
+    return std::nullopt;
+  }
+  return deserialize(bytes.data(), bytes.size(), error, progress);
+}
+
+std::optional<MCTSStore> MCTSStore::deserialize(
+  const uint8_t* data,
+  size_t size,
+  std::string* error,
+  const DeserializeProgressFn& progress
+) {
+  if(data == nullptr || size < 32 || size > kMaxSerializedBytes) {
     if(error) *error = "serialized state has invalid byte count";
     return std::nullopt;
   }
-  const size_t payloadSize = bytes.size() - sizeof(uint64_t);
-  if(checksum64(bytes.data(), payloadSize) != decodeTrailingU64(bytes)) {
+  const size_t payloadSize = size - sizeof(uint64_t);
+  reportDeserializeProgress(progress, "verifying", 0.36, 0, payloadSize, "Verifying checksum");
+  if(checksum64Progress(data, payloadSize, progress, 0.36, 0.48) != decodeTrailingU64(data, size)) {
     if(error) *error = "serialized state checksum mismatch";
     return std::nullopt;
   }
-  ByteReader r(bytes, payloadSize);
+  reportDeserializeProgress(progress, "parsing_header", 0.50, 0, 1, "Parsing header");
+  ByteReader r(data, payloadSize);
   uint64_t magic = 0;
   uint32_t version = 0;
   if(!r.readU64(magic) || magic != kPersistMagic) {
@@ -2062,6 +2225,15 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
       r.readFloat(stats.utilityMean) &&
       r.readFloat(stats.utilitySqMean);
   };
+  reportDeserializeProgress(
+    progress,
+    "parsing_nodes",
+    0.52,
+    0,
+    nodeCount,
+    "Parsing nodes"
+  );
+  size_t nodeIndex = 0;
   for(Node& node : store.nodes) {
     uint8_t movePla = 0;
     uint8_t pla = 0;
@@ -2115,7 +2287,21 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
       node.hasStoredNN = false;
       node.nnOwnershipOffset = kInvalidNode;
     }
+    ++nodeIndex;
+    if(progress && (nodeIndex == nodeCount || (nodeIndex % 4096ULL) == 0)) {
+      const double t = nodeCount == 0 ? 1.0 : static_cast<double>(nodeIndex) / static_cast<double>(nodeCount);
+      reportDeserializeProgress(
+        progress,
+        "parsing_nodes",
+        0.52 + 0.22 * t,
+        static_cast<uint64_t>(nodeIndex),
+        nodeCount,
+        "Parsing nodes"
+      );
+    }
   }
+  reportDeserializeProgress(progress, "parsing_actions", 0.74, 0, actionCount, "Parsing actions");
+  size_t actionIndex = 0;
   for(Action& action : store.actions) {
     if(!r.readU32(action.parent) ||
        !r.readU32(action.child) ||
@@ -2126,35 +2312,69 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
       if(error) *error = "truncated action";
       return std::nullopt;
     }
+    ++actionIndex;
+    if(progress && (actionIndex == actionCount || (actionIndex % 16384ULL) == 0)) {
+      const double t = actionCount == 0 ? 1.0 : static_cast<double>(actionIndex) / static_cast<double>(actionCount);
+      reportDeserializeProgress(
+        progress,
+        "parsing_actions",
+        0.74 + 0.10 * t,
+        static_cast<uint64_t>(actionIndex),
+        actionCount,
+        "Parsing actions"
+      );
+    }
   }
+  reportDeserializeProgress(progress, "parsing_arenas", 0.85, 0, policyCount + ownershipCount + ancestorCount + visibleCount, "Parsing arenas");
+  size_t arenaDone = 0;
+  const uint64_t arenaTotal = policyCount + ownershipCount + ancestorCount + visibleCount;
+  auto bumpArena = [&](size_t step) {
+    arenaDone += step;
+    if(progress && (arenaDone >= arenaTotal || (arenaDone % (256ULL * 1024ULL)) == 0)) {
+      const double t = arenaTotal == 0 ? 1.0 : static_cast<double>(arenaDone) / static_cast<double>(arenaTotal);
+      reportDeserializeProgress(
+        progress,
+        "parsing_arenas",
+        0.85 + 0.08 * t,
+        static_cast<uint64_t>(arenaDone),
+        arenaTotal,
+        "Parsing arenas"
+      );
+    }
+  };
   for(float& value : store.policyArena) {
     if(!r.readFloat(value)) {
       if(error) *error = "truncated policy arena";
       return std::nullopt;
     }
+    bumpArena(1);
   }
   for(float& value : store.ownershipArena) {
     if(!r.readFloat(value)) {
       if(error) *error = "truncated ownership arena";
       return std::nullopt;
     }
+    bumpArena(1);
   }
   for(NodeId& id : store.ancestorArena) {
     if(!r.readU32(id)) {
       if(error) *error = "truncated ancestor arena";
       return std::nullopt;
     }
+    bumpArena(1);
   }
   for(uint8_t& value : store.visible) {
     if(!r.readU8(value) || value > 1) {
       if(error) *error = "truncated or invalid visible array";
       return std::nullopt;
     }
+    bumpArena(1);
   }
   if(!r.atEnd()) {
     if(error) *error = "trailing bytes";
     return std::nullopt;
   }
+  reportDeserializeProgress(progress, "validating", 0.94, 0, 1, "Validating store");
   if(version < 3) {
     for(NodeId id = 0; id < store.nodes.size(); ++id) {
       Node& node = store.nodes[id];
@@ -2199,6 +2419,7 @@ std::optional<MCTSStore> MCTSStore::deserialize(const std::vector<uint8_t>& byte
   store.rootBoardState = std::move(*materialized);
   if(!store.validate(error))
     return std::nullopt;
+  reportDeserializeProgress(progress, "complete", 1.0, 1, 1, "Deserialize complete");
   return store;
 }
 
