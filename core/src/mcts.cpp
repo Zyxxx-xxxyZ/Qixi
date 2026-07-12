@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace qixi::core {
 namespace {
@@ -254,7 +255,8 @@ private:
   size_t offset = 0;
 };
 
-constexpr uint64_t kMaxSerializedBytes = 512ULL * 1024ULL * 1024ULL;
+// Raised from 512 MiB: policy-only oracle stress can grow multi-hundred-MiB trees.
+constexpr uint64_t kMaxSerializedBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr uint64_t kMaxSerializedNodes = 5000000ULL;
 constexpr uint64_t kMaxSerializedActions = 20000000ULL;
 constexpr uint64_t kMaxArenaElements = 120000000ULL;
@@ -1233,6 +1235,54 @@ RootSnapshot MCTSStore::snapshot() const {
     return a.id < b.id;
   });
   return snap;
+}
+
+RootSnapshot MCTSStore::snapshotLight(
+  size_t maxCandidates,
+  size_t maxVisibleNodes,
+  bool includeOwnership
+) const {
+  RootSnapshot full = snapshot();
+  if(!includeOwnership) {
+    full.hasOwnership = false;
+    full.ownership.fill(0.0f);
+  }
+  if(maxCandidates > 0 && full.candidates.size() > maxCandidates)
+    full.candidates.resize(maxCandidates);
+
+  if(maxVisibleNodes == 0 || full.visibleTree.size() <= maxVisibleNodes)
+    return full;
+
+  // Always keep the path from root-of-game to current root, then fill remaining
+  // slots with earliest plies (sorted order is already by ply, then id).
+  std::unordered_set<NodeId> keep;
+  NodeId cursor = root;
+  while(cursor != kInvalidNode && cursor < nodes.size()) {
+    keep.insert(cursor);
+    if(nodes[cursor].parent == kInvalidNode)
+      break;
+    cursor = nodes[cursor].parent;
+  }
+  std::vector<TreeNodeSnapshot> trimmed;
+  trimmed.reserve(std::min(maxVisibleNodes, full.visibleTree.size()));
+  for(const TreeNodeSnapshot& item : full.visibleTree) {
+    if(keep.count(item.id) != 0)
+      trimmed.push_back(item);
+  }
+  for(const TreeNodeSnapshot& item : full.visibleTree) {
+    if(trimmed.size() >= maxVisibleNodes)
+      break;
+    if(keep.count(item.id) != 0)
+      continue;
+    trimmed.push_back(item);
+  }
+  std::sort(trimmed.begin(), trimmed.end(), [](const auto& a, const auto& b) {
+    if(a.ply != b.ply)
+      return a.ply < b.ply;
+    return a.id < b.id;
+  });
+  full.visibleTree = std::move(trimmed);
+  return full;
 }
 
 StoreMemoryStats MCTSStore::memoryStats() const {

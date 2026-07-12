@@ -121,6 +121,15 @@ NSString * const QixiNativeKataGoErrorDomain = @"QixiNativeKataGo";
   return nil;
 }
 
+- (nullable NSString *)coreIoProgressJSONWithError:(NSError **)error {
+  qixi::NativeKataGoResult result = _core->coreIoProgressJSON();
+  if (result.ok()) {
+    return [NSString stringWithUTF8String:result.responseJSON.c_str()];
+  }
+  [self populateError:error fromResult:result];
+  return nil;
+}
+
 - (nullable NSString *)legalMoveMaskJSONWithError:(NSError **)error {
   qixi::NativeKataGoResult result = _core->legalMoveMaskJSON();
   if (result.ok()) {

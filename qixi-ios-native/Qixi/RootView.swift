@@ -36,8 +36,8 @@ struct RootView: View {
         .padding(.bottom, safeInsets.bottom)
         .disabled(model.isBackendInteractionBlocked)
 
-        if let transition = model.backendTransition, model.onboardingCompleted {
-          BackendTransitionView(transition: transition)
+        if let job = model.activeBlockingJob, model.onboardingCompleted {
+          QixiMainPageProgressChrome(job: job)
             .transition(.opacity)
             .zIndex(3)
         }
@@ -49,38 +49,11 @@ struct RootView: View {
         }
       }
       .animation(.easeInOut(duration: 0.18), value: model.onboardingCompleted)
-      .animation(.easeInOut(duration: 0.12), value: model.backendTransition)
+      .animation(.easeInOut(duration: 0.12), value: model.activeBlockingJob?.id)
     }
     .sheet(item: $model.utilitySheet) { sheet in
       QixiUtilitySheetView(sheet: sheet, model: model)
     }
-  }
-}
-
-private struct BackendTransitionView: View {
-  let transition: QixiBackendTransition
-
-  var body: some View {
-    ZStack {
-      QixiColor.background.ignoresSafeArea()
-      VStack(spacing: 22) {
-        Text(L10n.text(.onboardingTitle))
-          .font(.system(size: 36, weight: .bold))
-          .foregroundStyle(QixiColor.ink)
-        ProgressView()
-          .controlSize(.large)
-          .tint(QixiColor.hermesBlue)
-          .accessibilityLabel(transition.statusText)
-        Text(transition.statusText)
-          .font(.system(size: 15, weight: .semibold))
-          .foregroundStyle(QixiColor.muted)
-          .multilineTextAlignment(.center)
-      }
-      .padding(.horizontal, 28)
-    }
-    .contentShape(Rectangle())
-    .accessibilityElement(children: .combine)
-    .accessibilityIdentifier("qixi-backend-transition")
   }
 }
 

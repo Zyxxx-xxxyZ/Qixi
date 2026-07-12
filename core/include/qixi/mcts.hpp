@@ -226,7 +226,15 @@ public:
   std::optional<NodeId> findVisibleNodeByLineage(uint64_t lineageHash) const;
   bool runPlayout();
   void runPlayouts(uint32_t count);
+  // Full UI-facing snapshot (all visible nodes). Prefer snapshotLight for poll paths.
   RootSnapshot snapshot() const;
+  // Bounded snapshot for high-frequency UI polls. Caps candidates and visibleTree size;
+  // always includes the current root lineage chain when possible.
+  RootSnapshot snapshotLight(
+    size_t maxCandidates = 32,
+    size_t maxVisibleNodes = 4096,
+    bool includeOwnership = true
+  ) const;
   StoreMemoryStats memoryStats() const;
   MCTSStore cloneVisibleRecord(
     const Rules& rules,

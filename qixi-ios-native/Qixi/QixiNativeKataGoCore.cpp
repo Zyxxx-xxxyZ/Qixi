@@ -2252,8 +2252,24 @@ NativeKataGoResult NativeKataGoCore::submitCoreRequestJSON(const std::string& re
 }
 
 NativeKataGoResult NativeKataGoCore::latestCoreSnapshotJSON() {
-  const core::BackendResult result = coreBackend.latestSnapshot();
+  // UI poll path: light snapshot avoids shipping unbounded visibleTree over the bridge.
+  const core::BackendResult result = coreBackend.latestLightSnapshot(32, 4096, true);
   return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
+}
+
+NativeKataGoResult NativeKataGoCore::coreIoProgressJSON() {
+  const core::BackendWorker::IoProgress progress = coreBackend.currentIoProgress();
+  std::ostringstream out;
+  out << std::boolalpha;
+  out << "{";
+  out << "\"active\":" << (progress.active ? "true" : "false");
+  out << ",\"phase\":\"" << progress.phase << "\"";
+  out << ",\"fraction\":" << progress.fraction;
+  out << ",\"bytesDone\":" << progress.bytesDone;
+  out << ",\"bytesTotal\":" << progress.bytesTotal;
+  out << ",\"message\":\"" << progress.message << "\"";
+  out << "}";
+  return {NativeKataGoStatusCode::ok, progress.active ? progress.phase : "idle", out.str()};
 }
 
 NativeKataGoResult NativeKataGoCore::legalMoveMaskJSON() {

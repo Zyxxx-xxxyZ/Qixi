@@ -128,6 +128,16 @@ enum QixiBackendTransition: Equatable {
       return L10n.text(.backendInstallingModel)
     }
   }
+
+  var jobKind: QixiBlockingJob.Kind {
+    switch self {
+    case .restoringState: return .restoringState
+    case .switchingEngine: return .switchingEngine
+    case .exportingState: return .exportingState
+    case .importingState: return .importingState
+    case .installingModel: return .installingModel
+    }
+  }
 }
 
 @MainActor
@@ -201,7 +211,9 @@ final class QixiViewModel: ObservableObject {
   @Published private(set) var lastSaveError: String?
   @Published private(set) var lastEngineError: String?
   @Published private(set) var syncStatus = QixiSyncStatus()
+  /// Legacy name kept for diagnostics; prefer `activeBlockingJob`.
   @Published private(set) var backendTransition: QixiBackendTransition? = nil
+  @Published private(set) var activeBlockingJob: QixiBlockingJob? = nil
   @Published var language: AppLanguage = AppLanguage.current
   @Published var onboardingCompleted: Bool = false
   @Published var iCloudSyncEnabled: Bool = false
@@ -245,6 +257,8 @@ final class QixiViewModel: ObservableObject {
   private var backendTransitionOrder: [UInt64] = []
   private var backendTransitionsByToken: [UInt64: QixiBackendTransition] = [:]
   private var nextBackendTransitionToken: UInt64 = 1
+  private let blockingJobs = QixiBlockingJobCoordinator()
+  private var ioProgressPollTask: Task<Void, Never>?
   private var lifecycleCheckpointPending = false
   private var enteredBackgroundSinceLastForeground = false
   private var coreQualityDeltaByVariationNodeID: [String: Double] = [:]
@@ -257,7 +271,7 @@ final class QixiViewModel: ObservableObject {
   }
 
   var isBackendInteractionBlocked: Bool {
-    backendTransition != nil
+    activeBlockingJob != nil || backendTransition != nil
   }
 
   @discardableResult
@@ -268,13 +282,107 @@ final class QixiViewModel: ObservableObject {
     backendTransitionOrder.append(token)
     backendTransitionsByToken[token] = transition
     backendTransition = transition
+    activeBlockingJob = QixiBlockingJob(
+      id: token,
+      kind: transition.jobKind,
+      title: QixiBlockingJob.title(for: transition.jobKind),
+      phase: transition.statusText,
+      fraction: nil,
+      detail: nil,
+      blocks: QixiBlockingJob.blocks(for: transition.jobKind)
+    )
     return token
+  }
+
+  private func updateBackendTransitionProgress(
+    _ token: UInt64?,
+    phase: String? = nil,
+    fraction: Double? = nil,
+    detail: String? = nil
+  ) {
+    guard let token, backendTransitionsByToken[token] != nil else { return }
+    guard var job = activeBlockingJob, job.id == token else { return }
+    if let phase { job.phase = phase }
+    if let fraction { job.fraction = min(1.0, max(0.0, fraction)) }
+    if let detail { job.detail = detail }
+    activeBlockingJob = job
   }
 
   private func finishBackendTransition(_ token: UInt64?) {
     guard let token, backendTransitionsByToken.removeValue(forKey: token) != nil else { return }
     backendTransitionOrder.removeAll { $0 == token }
     backendTransition = backendTransitionOrder.last.flatMap { backendTransitionsByToken[$0] }
+    stopIoProgressPolling()
+    if let remaining = backendTransitionOrder.last,
+       let kind = backendTransitionsByToken[remaining] {
+      activeBlockingJob = QixiBlockingJob(
+        id: remaining,
+        kind: kind.jobKind,
+        title: QixiBlockingJob.title(for: kind.jobKind),
+        phase: kind.statusText,
+        fraction: nil,
+        detail: nil,
+        blocks: QixiBlockingJob.blocks(for: kind.jobKind)
+      )
+    } else {
+      activeBlockingJob = nil
+    }
+  }
+
+  private func startIoProgressPolling(for token: UInt64) {
+    stopIoProgressPolling()
+    guard analysisService is NativeKataGoAnalysisService else { return }
+    ioProgressPollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self else { return }
+        guard self.backendTransitionsByToken[token] != nil else { return }
+        if let progress = try? await (self.analysisService as? NativeKataGoAnalysisService)?.coreIoProgress() {
+          await MainActor.run {
+            guard self.backendTransitionsByToken[token] != nil else { return }
+            let phase = progress.phase.isEmpty ? (self.activeBlockingJob?.phase ?? "") : progress.phase
+            let fraction: Double?
+            if progress.active {
+              if progress.bytesTotal > 0 {
+                fraction = Double(progress.bytesDone) / Double(progress.bytesTotal)
+              } else if progress.fraction > 0 {
+                fraction = progress.fraction
+              } else {
+                fraction = nil
+              }
+            } else {
+              fraction = nil
+            }
+            let detail: String?
+            if progress.bytesTotal > 0 {
+              detail = Self.formatByteProgress(done: progress.bytesDone, total: progress.bytesTotal)
+            } else if !progress.message.isEmpty {
+              detail = progress.message
+            } else {
+              detail = nil
+            }
+            self.updateBackendTransitionProgress(
+              token,
+              phase: progress.active ? phase : nil,
+              fraction: fraction,
+              detail: detail
+            )
+          }
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+    }
+  }
+
+  private func stopIoProgressPolling() {
+    ioProgressPollTask?.cancel()
+    ioProgressPollTask = nil
+  }
+
+  private static func formatByteProgress(done: UInt64, total: UInt64) -> String {
+    func mb(_ value: UInt64) -> String {
+      String(format: "%.1f MB", Double(value) / (1024.0 * 1024.0))
+    }
+    return "\(mb(done)) / \(mb(total))"
   }
 
   init(analysisService: (any QixiAnalysisService)? = nil) {
@@ -1775,6 +1883,7 @@ final class QixiViewModel: ObservableObject {
 
   private func makeMCTSStatePackage(snapshot: QixiAppSnapshot, reason: String) async throws -> URL {
     let transitionToken = beginBackendTransition(.exportingState)
+    startIoProgressPolling(for: transitionToken)
     defer { finishBackendTransition(transitionToken) }
     await Task.yield()
     var packageSnapshot = snapshot
@@ -1784,11 +1893,13 @@ final class QixiViewModel: ObservableObject {
     }
     let packageURL = try QixiMCTSStatePackageStore.freshTemporaryPackageURL()
     do {
+      updateBackendTransitionProgress(transitionToken, phase: "Writing snapshot", fraction: 0.1)
       try QixiMCTSStatePackageStore.writeSnapshot(packageSnapshot, to: packageURL)
       var includesEngineTombstone = false
       var includesCoreState = false
       if coreBackendService != nil {
         let coreStateURL = QixiMCTSStatePackageStore.coreStateURL(in: packageURL)
+        updateBackendTransitionProgress(transitionToken, phase: "Serializing MCTS store", fraction: 0.25)
         try await submitCoreMutationAndWait(
           .exportAnalysisState(path: coreStateURL.path, expectedBackendEpoch: 0),
           reason: "coreMCTSStateExport"
@@ -1826,11 +1937,13 @@ final class QixiViewModel: ObservableObject {
       throw QixiCoreBarrierError(operation: "MCTS state import", backendMessage: "another backend transition is active")
     }
     let transitionToken = beginBackendTransition(.importingState)
+    startIoProgressPolling(for: transitionToken)
     defer { finishBackendTransition(transitionToken) }
     await Task.yield()
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
     await waitForCoreMutationDrain()
+    updateBackendTransitionProgress(transitionToken, phase: "Reading package", fraction: 0.05)
     let imported = try QixiMCTSStatePackageStore.loadPackage(from: packageURL)
     if let coreStateURL = imported.coreStateURL {
       guard let coreBackendService else {
@@ -1843,6 +1956,7 @@ final class QixiViewModel: ObservableObject {
       let previousEngine = selectedEngine
       do {
         try await submitCoreEngineSelectionAndWait(.none, reason: "coreMCTSStateImportQuiesce")
+        updateBackendTransitionProgress(transitionToken, phase: "Importing MCTS store", fraction: 0.25)
         try await submitCoreMutationAndWait(
           .importAnalysisState(path: coreStateURL.path, expectedBackendEpoch: 0),
           reason: "coreMCTSStateImport"
@@ -2309,7 +2423,11 @@ final class QixiViewModel: ObservableObject {
     var records: [String: QixiVariationNodeRecord] = [:]
     var childIDsByParent: [String: [String]] = [:]
     var laneByNode: [UInt32: Int] = [:]
-    let orderedNodes = snapshot.visibleTree.sorted {
+    // Light snapshots already cap size; still bound layout cost on main thread.
+    let maxLayoutNodes = 4096
+    let orderedNodes = snapshot.visibleTree
+      .prefix(maxLayoutNodes)
+      .sorted {
       if $0.ply != $1.ply { return $0.ply < $1.ply }
       return $0.id < $1.id
     }

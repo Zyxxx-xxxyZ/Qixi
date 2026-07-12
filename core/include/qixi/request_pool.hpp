@@ -124,8 +124,25 @@ public:
   void drainForTests();
   BackendResult executeForTests(RequestKind kind, RequestPayload payload, BackendEpoch expectedEpoch);
   BackendResult latestSnapshot() const;
+  // High-frequency UI poll: bounded candidates / visible tree (see MCTSStore::snapshotLight).
+  BackendResult latestLightSnapshot(
+    size_t maxCandidates = 32,
+    size_t maxVisibleNodes = 4096,
+    bool includeOwnership = true
+  ) const;
   std::array<bool, kMoveCount> legalMoveMask() const;
   void runSearchPlayouts(uint32_t count);
+
+  // Best-effort progress for long I/O jobs (export/import/checkpoint). Thread-safe.
+  struct IoProgress {
+    bool active = false;
+    std::string phase;       // e.g. "serializing", "writing", "reading", "parsing", "activating"
+    double fraction = 0.0;   // 0..1 when known; otherwise 0 with active=true
+    uint64_t bytesDone = 0;
+    uint64_t bytesTotal = 0;
+    std::string message;
+  };
+  IoProgress currentIoProgress() const;
 
   void setEvaluator(Evaluator* evaluator);
   void setEngineSelector(EngineSelector selector);
@@ -157,6 +174,7 @@ private:
 
   mutable std::mutex queueMutex;
   mutable std::mutex stateMutex;
+  mutable std::mutex ioProgressMutex;
   std::condition_variable queueCondition;
   std::deque<PendingRequest> queue;
   FrontendRequest runningRequest;
@@ -168,6 +186,17 @@ private:
   ResultCallback callback;
   EngineSelector engineSelector;
   Context ctx;
+  IoProgress ioProgress;
+
+  void setIoProgress(
+    bool active,
+    const std::string& phase,
+    double fraction,
+    uint64_t bytesDone = 0,
+    uint64_t bytesTotal = 0,
+    const std::string& message = {}
+  );
+  void clearIoProgress();
 
   PendingRequest makePendingRequest(
     RequestKind kind,

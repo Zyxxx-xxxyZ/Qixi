@@ -139,7 +139,9 @@ public:
   NativeKataGoResult exportTombstoneToFile(const std::string& filePath);
   NativeKataGoResult restoreTombstoneFromFile(const std::string& filePath);
   NativeKataGoResult submitCoreRequestJSON(const std::string& requestJSON);
+  // Bounded snapshot for high-frequency UI polls (candidates + capped variation tree).
   NativeKataGoResult latestCoreSnapshotJSON();
+  NativeKataGoResult coreIoProgressJSON();
   NativeKataGoResult legalMoveMaskJSON();
   NativeKataGoResult exportCoreStateToFile(const std::string& filePath);
   NativeKataGoResult importCoreStateFromFile(const std::string& filePath);

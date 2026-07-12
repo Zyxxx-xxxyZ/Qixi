@@ -18,7 +18,9 @@
 namespace qixi::core {
 namespace {
 
-constexpr uint64_t kMaxCoreStateBytes = 512ULL * 1024ULL * 1024ULL;
+// Product-facing cap for core-state files (export/import/checkpoint). Large enough
+// for long analysis sessions; small enough to reduce double-buffer OOM risk on iPad.
+constexpr uint64_t kMaxCoreStateBytes = 384ULL * 1024ULL * 1024ULL;
 constexpr uint64_t kStoreBundleMagic = 0x51495849424E444CULL; // "QIXIBNDL"
 constexpr uint32_t kStoreBundleVersion = 1;
 constexpr uint32_t kMaxStoreBundleEntries = 256;
@@ -521,6 +523,32 @@ BackendResult BackendWorker::executeForTests(RequestKind kind, RequestPayload pa
   return executeRequest(request);
 }
 
+void BackendWorker::setIoProgress(
+  bool active,
+  const std::string& phase,
+  double fraction,
+  uint64_t bytesDone,
+  uint64_t bytesTotal,
+  const std::string& message
+) {
+  std::lock_guard<std::mutex> lock(ioProgressMutex);
+  ioProgress.active = active;
+  ioProgress.phase = phase;
+  ioProgress.fraction = std::max(0.0, std::min(1.0, fraction));
+  ioProgress.bytesDone = bytesDone;
+  ioProgress.bytesTotal = bytesTotal;
+  ioProgress.message = message;
+}
+
+void BackendWorker::clearIoProgress() {
+  setIoProgress(false, "", 0.0, 0, 0, "");
+}
+
+BackendWorker::IoProgress BackendWorker::currentIoProgress() const {
+  std::lock_guard<std::mutex> lock(ioProgressMutex);
+  return ioProgress;
+}
+
 BackendResult BackendWorker::latestSnapshot() const {
   std::lock_guard<std::mutex> lock(stateMutex);
   BackendResult result;
@@ -534,6 +562,26 @@ BackendResult BackendWorker::latestSnapshot() const {
   result.storeState = ctx.storeState;
   if(ctx.store)
     result.snapshot = ctx.store->snapshot();
+  return result;
+}
+
+BackendResult BackendWorker::latestLightSnapshot(
+  size_t maxCandidates,
+  size_t maxVisibleNodes,
+  bool includeOwnership
+) const {
+  std::lock_guard<std::mutex> lock(stateMutex);
+  BackendResult result;
+  result.requestId = 0;
+  result.backendEpoch = ctx.backendEpoch;
+  result.revision = ctx.revision;
+  result.ok = ctx.store != nullptr && ctx.storeState == StoreState::ready;
+  result.message = result.ok ? "light snapshot copied" : "store is not ready";
+  result.currentRoot = ctx.store ? ctx.store->currentRoot() : kInvalidNode;
+  result.engineState = ctx.engineState;
+  result.storeState = ctx.storeState;
+  if(ctx.store)
+    result.snapshot = ctx.store->snapshotLight(maxCandidates, maxVisibleNodes, includeOwnership);
   return result;
 }
 
@@ -999,17 +1047,25 @@ BackendResult BackendWorker::handleExportAnalysisState(const FrontendRequest& re
   auto result = baseResult(request, true, "analysis state exported");
   if(!ensureStoreReady(result))
     return result;
+  setIoProgress(true, "checkpointing", 0.05, 0, 0, "Saving active store");
   std::string error;
-  if(!checkpointCurrentStore(error))
+  if(!checkpointCurrentStore(error)) {
+    clearIoProgress();
     return baseResult(request, false, error);
+  }
 
   std::vector<uint8_t> bytes;
   if(ctx.storeDirectory.empty()) {
+    setIoProgress(true, "serializing", 0.25, 0, 0, "Serializing MCTS store");
     bytes = ctx.store->serialize();
-    if(bytes.empty())
+    if(bytes.empty()) {
+      clearIoProgress();
       return baseResult(request, false, "serialized store exceeds the core-state byte limit");
+    }
+    setIoProgress(true, "serializing", 0.55, bytes.size(), bytes.size(), "Serialized MCTS store");
   }
   else {
+    setIoProgress(true, "bundling", 0.20, 0, 0, "Collecting store bundle");
     const std::string activeFilename = std::filesystem::path(storePath(ctx.currentKey)).filename().string();
     std::vector<StoreBundleEntry> entries;
     std::error_code iteratorError;
@@ -1045,16 +1101,26 @@ BackendResult BackendWorker::handleExportAnalysisState(const FrontendRequest& re
     }
     if(iteratorError && error.empty())
       error = "could not enumerate core store directory";
-    if(!error.empty())
+    if(!error.empty()) {
+      clearIoProgress();
       return baseResult(request, false, error);
+    }
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
       return a.filename < b.filename;
     });
-    if(!buildStoreBundle(activeFilename, entries, bytes, error))
+    if(!buildStoreBundle(activeFilename, entries, bytes, error)) {
+      clearIoProgress();
       return baseResult(request, false, error);
+    }
+    setIoProgress(true, "bundling", 0.55, bytes.size(), bytes.size(), "Bundle ready");
   }
-  if(!writeFileAtomically(payload.path, bytes, error))
+  setIoProgress(true, "writing", 0.75, 0, bytes.size(), "Writing package");
+  if(!writeFileAtomically(payload.path, bytes, error)) {
+    clearIoProgress();
     return baseResult(request, false, error);
+  }
+  setIoProgress(true, "complete", 1.0, bytes.size(), bytes.size(), "Export complete");
+  clearIoProgress();
   return result;
 }
 
@@ -1254,20 +1320,28 @@ BackendResult BackendWorker::handleSetTerritoryMode(const FrontendRequest& reque
 }
 
 BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& request, const ImportAnalysisStateRequest& payload) {
+  setIoProgress(true, "reading", 0.05, 0, 0, "Reading MCTS state");
   std::vector<uint8_t> bytes;
   std::string error;
-  if(!readFile(payload.path, bytes, error))
+  if(!readFile(payload.path, bytes, error)) {
+    clearIoProgress();
     return baseResult(request, false, error);
+  }
+  setIoProgress(true, "parsing", 0.30, bytes.size(), bytes.size(), "Parsing MCTS state");
 
   std::optional<MCTSStore> loaded;
   std::vector<StoreBundleEntry> bundleEntries;
   std::string activeFilename;
   const GameId importedGameId = ctx.nextGameId;
   if(hasStoreBundleMagic(bytes)) {
-    if(!parseStoreBundle(bytes, activeFilename, bundleEntries, error))
+    if(!parseStoreBundle(bytes, activeFilename, bundleEntries, error)) {
+      clearIoProgress();
       return baseResult(request, false, error);
-    if(ctx.storeDirectory.empty())
+    }
+    if(ctx.storeDirectory.empty()) {
+      clearIoProgress();
       return baseResult(request, false, "cannot import a multi-store bundle without a store directory");
+    }
     std::vector<uint8_t>().swap(bytes);
 
     std::set<std::string> analysisKeys;
@@ -1384,6 +1458,7 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
     }
     std::vector<uint8_t>().swap(bytes);
   }
+  setIoProgress(true, "activating", 0.85, 0, 0, "Activating imported store");
   ctx.store = std::make_unique<MCTSStore>(std::move(*loaded));
   ctx.currentKey = ctx.store->analysisKey();
   ctx.params = ctx.store->searchParams();
@@ -1393,7 +1468,9 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
   ctx.storeState = StoreState::ready;
   bumpEpoch();
   auto result = baseResult(request, true, "analysis state imported");
-  result.snapshot = ctx.store->snapshot();
+  result.snapshot = ctx.store->snapshotLight(32, 4096, true);
+  setIoProgress(true, "complete", 1.0, 0, 0, "Import complete");
+  clearIoProgress();
   return result;
 }
 

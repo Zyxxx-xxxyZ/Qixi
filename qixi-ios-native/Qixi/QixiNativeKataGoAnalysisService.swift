@@ -44,6 +44,7 @@ protocol NativeKataGoBridgeProtocol: AnyObject {
   func restoreTombstone(from url: URL) throws
   func submitCoreRequestJSON(_ requestJSON: String) throws -> String
   func latestCoreSnapshotJSON() throws -> String
+  func coreIoProgressJSON() throws -> String
   func legalMoveMaskJSON() throws -> String
   func exportCoreState(to url: URL) throws
   func importCoreState(from url: URL) throws
@@ -147,6 +148,28 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
     do {
       let responseJSON = try bridge.latestCoreSnapshotJSON()
       return try decodeCoreBackendResult(from: responseJSON)
+    } catch {
+      throw mapNativeBridgeError(error)
+    }
+  }
+
+  struct CoreIoProgress: Decodable, Equatable {
+    var active: Bool
+    var phase: String
+    var fraction: Double
+    var bytesDone: UInt64
+    var bytesTotal: UInt64
+    var message: String
+  }
+
+  func coreIoProgress() async throws -> CoreIoProgress {
+    do {
+      let responseJSON = try bridge.coreIoProgressJSON()
+      let data = try NativeKataGoBridgeResponseValidator.validatedData(
+        from: responseJSON,
+        maxResponseBytes: 16 * 1024
+      )
+      return try coreJSONDecoder.decode(CoreIoProgress.self, from: data)
     } catch {
       throw mapNativeBridgeError(error)
     }
