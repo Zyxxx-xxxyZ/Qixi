@@ -55,27 +55,19 @@ LEGACY_IPHONEOS_LOAD_COMMAND = "LC_VERSION_MIN_IPHONEOS"
 SOURCE_TEXT_MAX_BYTES = 4 * 1024 * 1024
 PLIST_MAX_BYTES = 1 * 1024 * 1024
 KATAGO_REQUIRED_SYMBOL_FRAGMENTS = (
-  "AsyncBot",
   "BoardHistory",
   "NNEvaluator",
-  "Search",
   "initializeNNEvaluator",
   "loadSingleParams",
-  "setPositionForMCTSPersistence",
-  "runWholeSearch",
-  "getAnalysisJson",
-  "getAverageTreeOwnership",
-  "exportPersistentMCTS",
-  "restorePersistentMCTSTombstone",
+  "NNOutput",
+  "ScoreValue",
+  "Setup",
 )
 KATAGO_MIN_DEFINED_SYMBOLS = 250
 KATAGO_MIN_KATAGO_LIKE_SYMBOLS = 40
 KATAGO_LIKE_SYMBOL_FRAGMENTS = (
-  "AnalysisData",
-  "AsyncBot",
   "Board::",
   "BoardHistory",
-  "EvalCacheTable",
   "Loc::",
   "Move",
   "NNOutput",
@@ -84,13 +76,8 @@ KATAGO_LIKE_SYMBOL_FRAGMENTS = (
   "Player",
   "Rules::",
   "ScoreValue",
-  "Search::",
   "SearchParams",
   "Setup::",
-  "TimeControls",
-  "getAnalysisJson",
-  "getAverageTreeOwnership",
-  "setPositionForMCTSPersistence",
 )
 KATAGO_SWIFT_REQUIRED_SYMBOL_FRAGMENTS = (
   "KataGoSwift",

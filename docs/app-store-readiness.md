@@ -422,11 +422,10 @@ new data flow, it must update:
   `scripts/qixi-native-linked-build-preflight.sh` must validate the submitted
   library or XCFramework as an iOS device arm64 artifact and reject dummy
   libraries that only spoof broad symbol names. The artifact must expose the
-  concrete KataGo adapter boundary used by Qixi, including
-  `initializeNNEvaluator`, `loadSingleParams`,
-  `setPositionForMCTSPersistence`, `runWholeSearch`, `getAnalysisJson`,
-  `getAverageTreeOwnership`, `exportPersistentMCTS`, and
-  `restorePersistentMCTSTombstone`.
+  concrete KataGo **NN** adapter boundary used by Qixi (e.g.
+  `initializeNNEvaluator`, `loadSingleParams`, `NNEvaluator`, `BoardHistory`).
+  Product search is `core::MCTSStore` only—not KataGo `Search` /
+  `runWholeSearch` / Search persistent-MCTS tombstones.
 - The production model package flow must generate, import, digest-check, and
   retain preconverted `.mlpackage` or `.mlmodelc` files for every supported
   KataGo model and board/batch/precision variant used by ANE/CoreML mux

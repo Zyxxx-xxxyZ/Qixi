@@ -38,15 +38,15 @@ The SwiftUI app depends on `QixiAnalysisService`.
 - The native linked-build preflight must inspect the submitted iOS device
   library or XCFramework with `lipo`, `otool`, and `nm`. A candidate artifact
   is not considered a real KataGo runtime merely because it contains broad
-  symbol names such as `AsyncBot` or `Search`; it must also expose the concrete
-  adapter boundary used by Qixi: `initializeNNEvaluator`, `loadSingleParams`,
-  `setPositionForMCTSPersistence`, `runWholeSearch`, `getAnalysisJson`,
-  `getAverageTreeOwnership`, `exportPersistentMCTS`, and
-  `restorePersistentMCTSTombstone`. The preflight also demangles symbols with
-  `c++filt` when available and requires a substantial defined-symbol count plus
-  a minimum set of KataGo-like C++ symbols. This prevents a tiny iOS archive
-  that exports all broad fragment names as empty C functions from being treated
-  as a linked KataGo runtime.
+  symbol names alone; it must also expose the concrete **NN** adapter boundary
+  used by Qixi: `initializeNNEvaluator`, `loadSingleParams`, `NNEvaluator`,
+  `BoardHistory`, and related eval/setup symbols. **Search is not KataGo's
+  `Search` / `AsyncBot`.** Product search is `core::MCTSStore` only, fed by
+  `LinkedCoreEvaluator` wrapping `NNEvaluator`. The preflight also demangles
+  symbols with `c++filt` when available and requires a substantial
+  defined-symbol count plus a minimum set of KataGo-like C++ symbols for the
+  neural path. This prevents a tiny iOS archive that exports empty C functions
+  from being treated as a linked KataGo NN runtime.
 - `QixiNativeModelRegistry` is the Swift manifest for b6, b18nbt, and b28nbt
   resource names, expected byte count, SHA-256 digest, and memory budgets. Swift
   must resolve a model against that manifest before passing its filesystem path
@@ -225,29 +225,40 @@ physical-device `nativeInProcess` evidence.
 ## Production Adapter Contract
 
 The production iOS adapter belongs in `QixiNativeKataGoEngine.cpp` behind the
-existing `qixi::NativeKataGoEngine` interface. It must embed KataGo at the
-analysis/search layer, not by launching a process or by tunneling through a text
-protocol.
+existing `qixi::NativeKataGoEngine` interface. It embeds KataGo **only as a
+neural-network evaluator**, not as a search engine, and not by launching a
+process or tunneling through a text protocol.
 
-The adapter must initialize KataGo in-process with the same primitives used by
-KataGo's JSON analysis engine:
+### Search ownership (mandatory)
+
+- **All product MCTS** (selection, expansion, backup, ownership aggregation,
+  root switch, persistence) lives in **`core::MCTSStore`**, driven by
+  `core::BackendWorker` inside `qixi::NativeKataGoCore`.
+- The linked adapter must **not** construct `AsyncBot`, must **not** call
+  `Search::runWholeSearch`, and must **not** use KataGo Search persistent-MCTS
+  export/import (`exportPersistentMCTS` / `restorePersistentMCTSTombstone`).
+- `analyzeRequest` on the linked engine is **disabled**. Swift UI analysis comes
+  from `submitCoreRequest` / `latestCoreSnapshot` (core snapshots → existing UI
+  fields). Residual `analyze()` on `NativeKataGoAnalysisService` maps a core
+  snapshot into `AnalysisResponse` without touching KataGo Search.
+- Lifecycle tombstones (`exportTombstoneToFile` / `restoreTombstoneFromFile` on
+  `NativeKataGoCore`) export/import **core MCTS state** (`core-state.bin`
+  semantics), not Search trees.
+
+### NN initialization (KataGo)
+
+The adapter must initialize KataGo in-process for **weights + eval only**:
 
 - `Board::initHash` and `ScoreValue::initTables` during adapter/session startup.
 - `ConfigParser`, `Setup::initializeSession`, `Setup::loadSingleParams`, and
   `Setup::initializeNNEvaluator` for model/config initialization.
-- `NNEvaluator::spawnServerThreads`/lifecycle owned by the adapter or by the
-  setup path that creates it, with shutdown on engine unload.
-- `AsyncBot` and its underlying `Search` object for root switching, search
-  execution, and subtree reuse. The iOS adapter must not reimplement MCTS logic
-  outside KataGo's search layer.
-- `EvalCacheTable` when enabled by `SearchParams`, shared across analysis work
-  for the same loaded model without crossing engine identities.
-- `Search::getAnalysisData` or `Search::getAnalysisJson` for candidate moves,
-  visits, winrate, score mean, and principal variations.
-- `Search::getAverageTreeOwnership` for the MCTS+NN territory heatmap that the
-  board UI renders, and
-  `Search::getAverageAndStandardDeviationTreeOwnership` when uncertainty is
-  requested.
+- `NNEvaluator` lifecycle owned by the adapter, with shutdown on engine unload
+  via `qixi::NativeKataGoEngine::unloadModel`.
+- `LinkedCoreEvaluator` implements `core::Evaluator` by rebuilding a KataGo
+  `Board`/`BoardHistory` from `core::BoardState` and calling
+  `NNEvaluator::evaluate` (policy, value, score, ownership).
+- `SearchParams` may be loaded only as **NN/misc input knobs** for that
+  evaluator (e.g. utility factors, policy temperature)—not as a live Search.
 
 The adapter must not use `MainCmds::analysis`. The adapter must not use `MainCmds::gtp`. It also must not use a spawned `katago` executable, `popen`,
 `system`, `NSTask`, `Process`, `URLSession`, localhost, LAN URLs, the Python
@@ -272,78 +283,33 @@ differs. The shared
 fixture is first checked by `tests/validate_position_identity_fixture.py`, which
 rejects duplicate JSON keys, `NaN`/`Infinity`, unknown relation targets, and
 missing required same-visible/different-identity relations before either backend
-uses it. The adapter must set the root with
-`AsyncBot::setPosition` or an equivalent `Search::setPosition` path using a
-`BoardHistory` that preserves ko/encore/superko-relevant history, not only the
-current stone bitmap.
-The production adapter must use `parseNativeKataGoAnalysisRequestJSON` to obtain
-the shared `NativeKataGoAnalysisRequest` structure before constructing
-`BoardHistory`, so request validation, pass moves, repeated coordinates, komi,
-root noise, explicit KataGo `Chinese` rules, derived `nextPlayer`,
-parser-derived `finalBoard`, and ordered-history position identity cannot drift
-between the C++ core guard and the real KataGo adapter. `nextPlayer` is part of
-the parsed structure so the
-adapter sets KataGo's root player from the same ordered history used for
-`BoardHistory`, including pass moves and repeated coordinates, instead of
-inferring it from the visible stone bitmap. `finalBoard` is part of the parsed
-structure so the adapter can build KataGo's `Board` from the same replay that
-validated captures, suicide, and ko, instead of maintaining a second
-JSON-to-board implementation. `rules` are part of the parsed structure so the
-adapter constructs KataGo `Rules` from the same default used by the Mac-hosted
-backend: Chinese rules, simple ko, area scoring, no tax, no multi-stone suicide,
-no button, white-handicap-bonus N, and friendly pass allowed. The parser must
-replay the ordered move history before any no-engine response or adapter call,
-accepting repeated coordinates only when the earlier stone has actually been
-captured, and rejecting occupied-point moves, suicide, and immediate simple-ko
-recapture. The
-adapter root builder must not clear `BoardHistory` mid-replay when tolerant
-history contains consecutive same-color moves; `BoardHistory.moveHistory` must
-stay the same length as the parsed `moves` array so ko/superko-relevant ordered
-history is not weakened to only the final stone bitmap. The
-`NativeKataGoEngine` interface must expose
-`analyzeRequest(const NativeKataGoAnalysisRequest&)` rather than a raw JSON
-analysis method, so production adapters cannot bypass the shared parser.
+uses it.
 
-The adapter response must be built from the post-search `Search` state and then
-pass `qixi::NativeKataGoCore`'s response guard before Objective-C++ returns it
-to Swift. Root ownership must be the MCTS+NN average from the current root, not
-the raw neural-network ownership map, unless a future explicit API field names a
-separate neural-only heatmap.
+Product game state and root switching live in **`core::MCTSStore`** (ordered
+move history, ko/superko, Chinese rules defaults). The NN adapter rebuilds a
+KataGo `BoardHistory` only inside `LinkedCoreEvaluator` for leaf evaluation,
+preserving enough history for the net (`maxHistory` / core move list)—not as a
+second parallel Search tree.
 
-Persistent MCTS state belongs in the `NativeKataGoEngine` implementation because
-it is model/search-state specific. `exportTombstoneToFile` in the linked adapter
-writes a versioned Qixi tombstone wrapper containing loaded-engine identity,
-nonempty Qixi `rootKeyMaterial`, memory-budget metadata, and KataGo's raw
-`Search::exportPersistentMCTS` payload; `restoreTombstoneFromFile` rejects
-wrappers that do not match the already loaded engine/model config, and also
-requires the inner payload to contain KataGo `rootKey` and `position`, before
-passing it to `Search::restorePersistentMCTSTombstone`.
-The linked adapter must keep raw persistent-MCTS tombstone reads bounded 256 MiB,
-open them with no-follow semantics when available, verify the opened descriptor
-with `fstat`, and read in chunks before JSON parsing. The read must reject both
-over-budget growth and opened-byte-count drift, so a corrupted, non-regular,
-symlinked, concurrently enlarged, or concurrently truncated state file cannot
-create a large one-shot iPad memory allocation or swap content after path
-inspection.
-Before `Search::exportPersistentMCTS` writes the raw payload, and before
-`Search::restorePersistentMCTSTombstone` consumes a staged raw payload, the
-linked adapter must prepare its internal `.persistent-mcts.tmp`,
-`.persistent-mcts.restore.tmp`, and atomic-write `.tmp` paths by deleting stale
-regular files while rejecting directories, symbolic links, and other non-regular
-entries. The atomic wrapper writer must then create its `.tmp` file exclusively
-with no-follow semantics when the platform exposes them, flush that temporary
-file with `F_FULLFSYNC` or `fsync` before rename, and fail without publishing the
-tombstone when the flush fails. This keeps a path replaced between inspection
-and open from being truncated, and reduces background-kill loss after a lifecycle
-save reports success. The writer must reject symbolic-link, directory-shaped,
+UI-facing analysis (candidates, visits, winrate, score mean, ownership heatmap)
+comes from **`core::RootSnapshot`** via `latestCoreSnapshot` / snapshot poll.
+Ownership on the board is the **core MCTS aggregated ownership**, not a raw-only
+NN map and not KataGo `Search::getAverageTreeOwnership`.
+
+Persistent MCTS state is **core-owned**. `NativeKataGoCore::exportTombstoneToFile`
+and `restoreTombstoneFromFile` export/import **core MCTS state** (same backend as
+`exportCoreStateToFile` / `importCoreStateFromFile` / package `core-state.bin`).
+They must **not** wrap KataGo `Search::exportPersistentMCTS`. No-engine
+tombstones remain a lightweight JSON placeholder. Core export paths keep
+bounded writes, atomic replace, and reject symbolic-link / directory-shaped
 and non-regular final targets before replacement, bound the payload size, verify
 the opened temporary descriptor's byte count after writing, and preserve the old
 target if `rename` fails. Internal persistent-MCTS temporary files must never follow a symlink or overwrite a
 non-regular lifecycle artifact.
-`restoreTombstoneFromFile` must restore only after Swift has resolved,
-memory-gated, configured, and loaded the requested engine. For linked engines,
-the tombstone wrapper must also match `coreMLPackagePaths`, because an ANE/CoreML
-companion package change is part of the loaded model identity.
+`restoreTombstoneFromFile` (core import) must run only after Swift has resolved,
+memory-gated, configured, and loaded the requested engine when analysis under
+that model is required. Model/CoreML identity is enforced at `loadModel` /
+manifest resolution time, not by re-validating a Search tombstone wrapper.
 
 Before loading a real engine, switching to `none`, or attempting a different
 real model, `NativeKataGoCore` must call `NativeKataGoEngine::unloadModel` and
@@ -361,7 +327,9 @@ engine changed.
 - HTTP bridge and native-in-process service implementations must stay in
   separate Swift files so static tests can prove the native path is not coupled
   to the Mac-hosted bridge.
-- The Swift service contract remains `setEngine` plus `analyze`.
+- The Swift service contract remains `setEngine` plus core analysis
+  (`submitCoreRequest` / `latestCoreSnapshot`); residual `analyze` maps a core
+  snapshot and must not invoke KataGo Search.
 - `BackendStatusResponse.engineId` is always the selected model identity
   (`none`, `b6`, `b18nbt`, or `b28nbt`) in both HTTP bridge and native-in-process
   services. Runtime identity belongs to `QixiAnalysisRuntime`; it must not be
@@ -383,14 +351,14 @@ engine changed.
   histories where replay proves a move played on an occupied point, suicide, or
   immediate simple-ko recapture. The parsed `NativeKataGoAnalysisRequest` must
   also expose `nextPlayer`, black for an empty history and otherwise the
-  opposite color of the final ordered move, so `AsyncBot::setPosition` receives
-  the same root player that Qixi analyzed. It must expose a 19x19 `finalBoard`
-  with empty/black/white points from the same replay, so the production adapter
-  can initialize KataGo's root `Board` without duplicating request parsing. It
-  must expose `NativeKataGoRules` matching KataGo's Chinese preset so
-  `BoardHistory` rule construction does not rely on adapter-owned defaults.
-- Analysis responses must decode to the same `AnalysisResponse` shape used by
-  the HTTP bridge.
+  opposite color of the final ordered move. Product search applies those
+  fields through **`core::MCTSStore`** mutations/roots, not `AsyncBot::setPosition`.
+  `LinkedCoreEvaluator` rebuilds KataGo `Board`/`BoardHistory` only for NN
+  leaf eval. Legacy request parsers may still expose `finalBoard` and
+  `NativeKataGoRules` for validation; live analysis does not require
+  `analyzeRequestJSON`.
+- Residual `AnalysisResponse` shapes (if produced from a core snapshot) must
+  still decode for any residual callers; the HTTP bridge path is Debug-only.
 - Before Swift decodes native bridge output, `NativeKataGoBridgeResponseValidator`
   must reject duplicate JSON keys, `NaN`/`Infinity`, non-object JSON, and
   response bodies larger than 1 MiB. This keeps a malformed successful adapter
@@ -578,17 +546,14 @@ qixi-ios-native/tests/run_native_katago_adapter_compile_probe.sh
 ```
 
 This compiles the `QIXI_ENABLE_NATIVE_KATAGO` gated implementation path in
-`QixiNativeKataGoEngine.cpp` against the real KataGo headers. It maps
-`NativeKataGoRules` to `Rules`, replays ordered `NativeKataGoMove` history into
-`Board` and `BoardHistory`, checks that `LinkedNativeKataGoEngine` initializes
-KataGo process tables, builds a `Setup::initializeNNEvaluator` + `AsyncBot`
-model lifecycle, runs analysis through `Search::setPositionForMCTSPersistence`
-and `Search::runWholeSearch`, wraps `Search::exportPersistentMCTS`, restores via
-`Search::restorePersistentMCTSTombstone`, and verifies that
-`Search::getAnalysisJson` and `Search::getAverageTreeOwnership` still
-type-check. It does not link a model into the iOS app or prove runtime iPad
-performance; it is a compile-time tripwire for API drift while the default
-development build still uses the explicit placeholder engine.
+`QixiNativeKataGoEngine.cpp` against the real KataGo headers. It checks that
+`LinkedNativeKataGoEngine` initializes KataGo process tables, builds a
+`Setup::initializeNNEvaluator` **NN-only** model lifecycle, and that
+`LinkedCoreEvaluator` type-checks against `NNEvaluator::evaluate` +
+`core::Evaluator`. It must **not** require `AsyncBot`, `runWholeSearch`, or
+Search persistent-MCTS APIs. It does not link a model into the iOS app or prove
+runtime iPad performance; it is a compile-time tripwire for NN API drift while
+the default development build still uses the explicit placeholder engine.
 
 The release linked-build preflight goes beyond checking that a path exists. A
 `QIXI_KATAGO_IOS_XCFRAMEWORK` artifact must have an `Info.plist` with

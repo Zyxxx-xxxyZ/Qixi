@@ -214,6 +214,8 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
     komi: Double,
     rootNoise: Double
   ) async throws -> AnalysisResponse {
+    // Product search is core::MCTSStore only. Map the latest core snapshot into the
+    // legacy AnalysisResponse shape for any residual callers; do not invoke KataGo Search.
     try QixiAnalysisInputValidator.validate(
       moves: moves,
       setupStones: setupStones,
@@ -222,32 +224,21 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
       rootNoise: rootNoise
     )
     do {
-      let request = AnalysisRequest(
-        moves: moves,
-        setupStones: setupStones,
-        maxVisits: maxVisits,
-        komi: komi,
-        rootNoise: rootNoise
-      )
-      let data = try JSONEncoder().encode(request)
-      let requestJSON = String(decoding: data, as: UTF8.self)
-      let responseJSON = try bridge.analyzeRequestJSON(requestJSON)
-      let responseData = try NativeKataGoBridgeResponseValidator.validatedData(from: responseJSON)
-      let decodedResponse: AnalysisResponse
-      do {
-        decodedResponse = try JSONDecoder().decode(AnalysisResponse.self, from: responseData)
-      } catch {
-        throw QixiNativeKataGoServiceError.invalidBridgeResponse(
-          "Native KataGo adapter response could not be decoded: \(error)"
-        )
-      }
-      var response = decodedResponse
-      guard response.engine == currentEngine.rawValue else {
+      let coreResult = try await latestCoreSnapshot()
+      guard coreResult.ok else {
         throw QixiNativeKataGoServiceError.invalidRequest(
-          "Native KataGo adapter returned engine \(response.engine) while \(currentEngine.rawValue) is loaded."
+          coreResult.message.isEmpty
+            ? "Core MCTS snapshot is not ready for analysis."
+            : coreResult.message
         )
       }
-      response.positionKey = QixiPositionIdentity.cacheKey(
+      guard let snapshot = coreResult.snapshot else {
+        throw QixiNativeKataGoServiceError.invalidRequest(
+          "Core MCTS snapshot is empty; wait for background playouts."
+        )
+      }
+      let response = Self.analysisResponse(
+        from: snapshot,
         engine: currentEngine,
         moves: moves,
         setupStones: setupStones,
@@ -256,9 +247,58 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
       )
       try QixiAnalysisResponseValidator.validate(response, expectedEngine: currentEngine)
       return response
+    } catch let error as QixiNativeKataGoServiceError {
+      throw error
     } catch {
       throw mapNativeBridgeError(error)
     }
+  }
+
+  private static func analysisResponse(
+    from snapshot: QixiCoreSnapshot,
+    engine: AnalysisEngine,
+    moves: [BoardMove],
+    setupStones: [BoardSetupStone],
+    komi: Double,
+    rootNoise: Double
+  ) -> AnalysisResponse {
+    let analysisMoves: [AnalysisMove] = snapshot.candidates.compactMap { candidate in
+      guard !candidate.pass,
+            candidate.x >= 0, candidate.x < 19,
+            candidate.y >= 0, candidate.y < 19 else {
+        return nil
+      }
+      return AnalysisMove(
+        x: candidate.x,
+        y: candidate.y,
+        move: nil,
+        visits: Int(clamping: candidate.visits),
+        winrate: candidate.winrate,
+        scoreMean: candidate.scoreMean
+      )
+    }
+    var ownership = snapshot.ownership
+    if ownership.count < 361 {
+      ownership.append(contentsOf: Array(repeating: 0.0, count: 361 - ownership.count))
+    } else if ownership.count > 361 {
+      ownership = Array(ownership.prefix(361))
+    }
+    return AnalysisResponse(
+      engine: engine.rawValue,
+      state: "running native core MCTS analysis",
+      positionKey: QixiPositionIdentity.cacheKey(
+        engine: engine,
+        moves: moves,
+        setupStones: setupStones,
+        komi: komi,
+        rootNoise: rootNoise
+      ),
+      winrate: snapshot.rootVisits > 0 ? snapshot.rootWinrate : nil,
+      scoreMean: snapshot.rootVisits > 0 ? snapshot.rootScoreMean : nil,
+      visits: Int(clamping: snapshot.rootVisits),
+      moves: analysisMoves,
+      ownership: ownership
+    )
   }
 
   func exportEngineTombstone(to url: URL) async throws {

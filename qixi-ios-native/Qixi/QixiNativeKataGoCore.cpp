@@ -2170,18 +2170,17 @@ bool NativeKataGoCore::selectCoreEngine(
 }
 
 NativeKataGoResult NativeKataGoCore::analyzeRequestJSON(const std::string& requestJSON) {
-  NativeKataGoAnalysisRequest request{};
-  NativeKataGoResult parseResult = parseNativeKataGoAnalysisRequestJSON(requestJSON, request);
-  if(!parseResult.ok())
-    return parseResult;
-  if(loadedEngineID == "none")
-    return noEngineAnalysisResult(request);
-  if(engine == nullptr)
-    return invalidRequestResult("Native KataGo engine adapter is missing.");
-  return validateAdapterAnalysisResult(engine->analyzeRequest(request), loadedEngineID);
+  // Search is core::MCTSStore only. The legacy KataGo Search analyze path is disabled.
+  // Callers must use submitCoreRequestJSON / latestCoreSnapshotJSON.
+  (void)requestJSON;
+  return invalidRequestResult(
+    "Native in-process analysis uses core::MCTSStore only; "
+    "analyzeRequestJSON is disabled. Use submitCoreRequest / latestCoreSnapshot."
+  );
 }
 
 NativeKataGoResult NativeKataGoCore::exportTombstoneToFile(const std::string& filePath) {
+  // Lifecycle "tombstones" are core::MCTSStore exports only — never KataGo Search trees.
   if(filePath.empty())
     return invalidRequestResult("Native KataGo tombstone file path must not be empty.");
   NativeKataGoResult exportPath = rejectNonRegularExistingTombstoneExportPath(filePath);
@@ -2189,28 +2188,29 @@ NativeKataGoResult NativeKataGoCore::exportTombstoneToFile(const std::string& fi
     return exportPath;
   if(loadedEngineID == "none")
     return writeNoEngineTombstoneToFile(filePath);
-  if(engine == nullptr)
-    return invalidRequestResult("Native KataGo engine adapter is missing.");
-  NativeKataGoResult result = engine->exportTombstoneToFile(filePath);
+  NativeKataGoResult result = exportCoreStateToFile(filePath);
   if(!result.ok())
     return result;
   NativeKataGoResult exportedFile = validateReadableNonEmptyTombstoneFile(
     filePath,
-    "Native KataGo adapter did not produce a readable non-empty regular tombstone file.",
-    "Native KataGo adapter produced a tombstone file exceeding the bounded size"
+    "Core MCTS export did not produce a readable non-empty regular tombstone file.",
+    "Core MCTS export produced a tombstone file exceeding the bounded size"
   );
   if(!exportedFile.ok())
     return exportedFile;
-  return result;
+  return {
+    NativeKataGoStatusCode::ok,
+    "Core MCTS state exported as native tombstone.",
+    result.responseJSON,
+  };
 }
 
 NativeKataGoResult NativeKataGoCore::restoreTombstoneFromFile(const std::string& filePath) {
+  // Lifecycle restore imports core::MCTSStore state only — never KataGo Search trees.
   if(filePath.empty())
     return invalidRequestResult("Native KataGo tombstone file path must not be empty.");
   if(loadedEngineID == "none")
     return restoreNoEngineTombstoneFromFile(filePath);
-  if(engine == nullptr)
-    return invalidRequestResult("Native KataGo engine adapter is missing.");
   NativeKataGoResult restoreFile = validateReadableNonEmptyTombstoneFile(
     filePath,
     "Native KataGo tombstone file is not a readable non-empty regular file.",
@@ -2220,10 +2220,16 @@ NativeKataGoResult NativeKataGoCore::restoreTombstoneFromFile(const std::string&
     clearLoadedEngineAfterTombstoneRestoreFailure(engine.get(), loadedEngineID);
     return restoreFile;
   }
-  NativeKataGoResult result = engine->restoreTombstoneFromFile(filePath);
+  NativeKataGoResult result = importCoreStateFromFile(filePath);
   if(!result.ok())
     clearLoadedEngineAfterTombstoneRestoreFailure(engine.get(), loadedEngineID);
-  return result;
+  return result.ok()
+    ? NativeKataGoResult{
+        NativeKataGoStatusCode::ok,
+        "Core MCTS state restored from native tombstone.",
+        result.responseJSON,
+      }
+    : result;
 }
 
 NativeKataGoResult NativeKataGoCore::submitCoreRequestLocked(
