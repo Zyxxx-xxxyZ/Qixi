@@ -31,3 +31,22 @@ Conventions:
 See `docs/grok-4.5-handoff.md` when working on the persistent MCTS integration.
 Do not claim official KataGo search equivalence without an oracle harness.
 Do not treat iOS Simulator success as Metal mux inference evidence.
+
+### Device install = product package (mandatory)
+
+When asked to **install the app on a device** (iPad/iPhone), that means:
+
+1. **Product build**, not Debug. Prefer **`NativeRelease`**:
+   `QIXI_ENABLE_NATIVE_KATAGO=1`, `QIXI_NATIVE_RELEASE`, `nativeInProcess`,
+   no HTTP bridge, linked iOS KataGo NN + current `core/` sources.
+2. **Newest project state**: build from the current working tree so every
+   product surface (Swift UI, native bridge, `core::MCTSStore`, models config)
+   matches the latest project changes—no stale DerivedData-only reinstall of
+   an older Debug binary.
+3. **In-sync package**: do not ship a Debug/placeholder engine while claiming
+   a product install. Rebuild NativeRelease (and required
+   `libkatago_core.a` / `libKataGoSwift.a` for **iphoneos**) when product
+   sources changed, then install that app.
+
+Debug device installs are only for explicitly requested diagnostics (e.g.
+“Debug build” / bridge smoke), never as the default meaning of “install the app.”
