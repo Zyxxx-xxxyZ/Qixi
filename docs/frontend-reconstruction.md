@@ -39,11 +39,15 @@ Logic extracted into:
 | `QixiBlockingSession` | Blocking jobs + I/O progress polling |
 | `QixiCoreMutationQueue` | FIFO core mutations / engine selection pump |
 | `QixiBlockingJob` | Progress chrome model (existing) |
+| `QixiAnalysisCache` | Per-engine analysis map, LRU, memory-pressure trim |
+| `QixiPersistenceCoordinator` | Debounced save, periodic autosave, lifecycle tombstone policy |
+| `QixiMemoryPressurePolicy` | Soft/hard OOM unload triggers |
 
 ## Not yet done (next slices)
 
-- Further slimming: analysis cache module, persistence coordinator, feature plugins.
+- Further slimming: feature plugins (camera/SGF/sync UI modules).
 - Incremental variation projection (diff apply).
+- ~~Analysis cache module + persistence coordinator~~ **done** (phase 2).
 - ~~Streaming deserialize / true byte-progress during parse~~ **done** (`deserializeFromFile` + progress; single-store import path).
 - ~~OOM unload policy wired to memory pressure~~ **done** (see below).
 - ~~Delete dual HTTP analysis path from product session~~ **done** (factory + ViewModel core-only; HTTP sources excluded from app target).

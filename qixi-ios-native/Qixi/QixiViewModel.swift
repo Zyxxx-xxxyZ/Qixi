@@ -2,25 +2,6 @@ import Foundation
 import SwiftUI
 import UIKit
 
-@MainActor
-private final class QixiEngineTombstoneBackgroundTask {
-  private var identifier: UIBackgroundTaskIdentifier = .invalid
-
-  init(name: String, expirationHandler: @escaping @MainActor () -> Void) {
-    identifier = UIApplication.shared.beginBackgroundTask(withName: name) {
-      Task { @MainActor in
-        expirationHandler()
-      }
-    }
-  }
-
-  func end() {
-    guard identifier != .invalid else { return }
-    UIApplication.shared.endBackgroundTask(identifier)
-    identifier = .invalid
-  }
-}
-
 private enum QixiAutomationEvidenceError: Error, LocalizedError {
   case missingEnvironment(String)
   case invalidInteger(String)
@@ -115,11 +96,10 @@ enum QixiBackendTransition: Equatable {
 }
 
 @MainActor
-final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPressureHost {
+final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPressureHost, QixiPersistenceHost {
   private static let variationRootID = QixiVariationModel.rootID
-  private static let autosaveInterval: TimeInterval = 20 * 60
-  private static let saveDebounceNanoseconds: UInt64 = 600_000_000
-  private static let maxCachedPositionsPerEngine = 96
+  // Autosave interval / debounce live on QixiPersistenceCoordinator.
+  // Analysis cache LRU cap lives on QixiAnalysisCache.
   private static let defaultKomi = QixiAnalysisLimits.defaultKomi
   private static let defaultRootNoise = QixiAnalysisLimits.defaultRootNoise
   private static let realtimeAnalysisInitialVisitBatch = 4
@@ -152,7 +132,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   @Published var showTerritory = false {
     didSet {
       guard !isApplyingSnapshot else { return }
-      saveSoon(reason: "territoryVisibilityChanged")
+      persistence.saveSoon(reason: "territoryVisibilityChanged")
     }
   }
   @Published var komi: Double {
@@ -163,7 +143,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       }
       guard !isApplyingSnapshot else { return }
       guard komi != oldValue else { return }
-      saveSoon(reason: "komiChanged")
+      persistence.saveSoon(reason: "komiChanged")
       refreshVisibleAnalysisForCurrentSettings()
       scheduleAnalysisRefresh(reason: "komiChanged")
     }
@@ -201,12 +181,12 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   let analysisService: any QixiAnalysisService
   private var analysisTask: Task<Void, Never>?
   private var analysisRefreshTask: Task<Void, Never>?
-  private var saveTask: Task<Void, Never>?
-  private var syncTask: Task<Void, Never>?
   private var engineTombstoneTask: Task<Void, Never>?
+  /// Manual sync only (product `syncNow`); autosave mirror lives on the coordinator.
+  private var syncTask: Task<Void, Never>?
   private var analysisGeneration = 0
-  private var autosaveTimer: Timer?
-  private var analysisByEngine: [String: [String: QixiCachedAnalysis]] = [:]
+  private var analysisCache = QixiAnalysisCache()
+  private let persistence = QixiPersistenceCoordinator()
   private var cachedBoardMoves: [BoardMove] = []
   private var bestCandidateWinrate: Double?
   private var cachedVisibleCandidates: [CandidateMove] = []
@@ -222,8 +202,6 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   private var coreCurrentRootID: UInt32 = 0
   private let coreMutationQueue = QixiCoreMutationQueue()
   private let blockingSession = QixiBlockingSession()
-  private var lifecycleCheckpointPending = false
-  private var enteredBackgroundSinceLastForeground = false
 
   var coreBackendService: (any QixiCoreBackendService)? {
     analysisService as? any QixiCoreBackendService
@@ -315,7 +293,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       self.currentPly = min(max(0, snapshot.currentPly), restoredMainLine.count)
       self.selectedEngine = snapshot.selectedEngine
       self.showTerritory = snapshot.showTerritory
-      self.analysisByEngine = snapshot.analysisByEngine
+      self.analysisCache.replaceAll(snapshot.analysisByEngine)
     } else {
       self.mainLine = Self.sampleLine
       self.komi = Self.defaultKomi
@@ -344,9 +322,10 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       environment: processEnvironment,
       arguments: processArguments
     )
-    startAutosaveTimer()
+    persistence.attach(host: self)
+    persistence.startAutosaveTimer()
     if !wroteAutomationLifecycleTombstone {
-      saveSoon(reason: "launchReady")
+      persistence.saveSoon(reason: "launchReady")
     }
     let launchTransitionToken = beginBackendTransition(.restoringState)
     Task { [self] in
@@ -366,18 +345,16 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   deinit {
     analysisTask?.cancel()
     analysisRefreshTask?.cancel()
-    saveTask?.cancel()
-    syncTask?.cancel()
     engineTombstoneTask?.cancel()
-    autosaveTimer?.invalidate()
+    syncTask?.cancel()
     if let memorySampler {
       Task { @MainActor in
         memorySampler.stop(reason: "deinit")
       }
     }
-    // Policy stop is main-actor; best-effort from deinit context.
-    Task { @MainActor [memoryPressurePolicy] in
+    Task { @MainActor [memoryPressurePolicy, persistence] in
       memoryPressurePolicy.stop()
+      persistence.stop()
     }
   }
 
@@ -491,15 +468,16 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
 
   private func cachedVariationAnalysis(for nodeID: String) -> QixiCachedAnalysis? {
     guard selectedEngine != .none else { return nil }
-    return analysisByEngine[selectedEngine.rawValue]?[
-      positionCacheKey(
+    return analysisCache.entry(
+      engine: selectedEngine,
+      cacheKey: positionCacheKey(
         engine: selectedEngine,
         moves: variationMoves(to: nodeID),
         setupStones: analysisSetupStones,
         komi: komi,
         rootNoise: rootNoise
       )
-    ]
+    )
   }
 
   private func variationMoveWinrateFromAnalyzedChild(
@@ -527,19 +505,19 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       komi: komi,
       rootNoise: rootNoise
     )
-    return analysisByEngine[selectedEngine.rawValue]?[key]
+    return analysisCache.entry(engine: selectedEngine, cacheKey: key)
   }
 
   func selectEngine(_ engine: AnalysisEngine) {
     guard !isBackendInteractionBlocked else { return }
     let previousEngine = selectedEngine
     let transitionToken = beginBackendTransition(.switchingEngine)
-    saveNow(reason: "beforeEngineSwitch")
+    persistence.saveNow(reason: "beforeEngineSwitch")
     analysisTask?.cancel()
     selectedEngine = engine
     if let coreBackendService {
       hermesStatus = .loading
-      saveNow(reason: engine == .none ? "engineNone" : "engineSelected")
+      persistence.saveNow(reason: engine == .none ? "engineNone" : "engineSelected")
       if engine == .none {
         submitCoreEngineSelection(engine, reason: "coreEngineUnloaded") { [weak self] success in
           guard let self else { return }
@@ -548,7 +526,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
           if !success {
             let failure = self.lastEngineError
             self.selectedEngine = previousEngine
-            self.saveNow(reason: "engineSelectionRolledBack")
+            self.persistence.saveNow(reason: "engineSelectionRolledBack")
             if previousEngine != .none {
               self.startCoreSnapshotPolling(
                 engine: previousEngine,
@@ -575,7 +553,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     }
     if engine == .none {
       hermesStatus = .loading
-      saveNow(reason: "engineNone")
+      persistence.saveNow(reason: "engineNone")
       analysisTask = Task { [weak self, analysisService] in
         guard let self else { return }
         do {
@@ -596,7 +574,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
           self.hermesStatus = .offline
           self.recordRuntimeDiagnostic(event: "engineUnloadFailed", success: false, message: String(describing: error))
           self.selectedEngine = previousEngine
-          self.saveNow(reason: "engineSelectionRolledBack")
+          self.persistence.saveNow(reason: "engineSelectionRolledBack")
           if previousEngine != .none {
             self.startAnalysis(
               engine: previousEngine,
@@ -609,7 +587,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       return
     }
 
-    saveNow(reason: "engineSelected")
+    persistence.saveNow(reason: "engineSelected")
     recordRuntimeDiagnostic(event: "engineSelected", success: true, message: "Selected engine \(engine.rawValue).")
     startAnalysis(
       engine: engine,
@@ -638,7 +616,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       )
       if let rollbackEngine, rollbackEngine != engine {
         selectedEngine = rollbackEngine
-        saveNow(reason: "engineSelectionRolledBack")
+        persistence.saveNow(reason: "engineSelectionRolledBack")
       }
       return
     }
@@ -674,7 +652,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
           let failure = self.lastEngineError
           if let rollbackEngine {
             self.selectedEngine = rollbackEngine
-            self.saveNow(reason: "engineSelectionRolledBack")
+            self.persistence.saveNow(reason: "engineSelectionRolledBack")
             if rollbackEngine != .none {
               self.startCoreSnapshotPolling(
                 engine: rollbackEngine,
@@ -768,7 +746,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     } else if !restoreCachedAnalysisForCurrentPosition() {
       clearVisibleAnalysisAndRefreshAnchor()
     }
-    saveSoon(reason: "step")
+    persistence.saveSoon(reason: "step")
     if coreBackendService != nil {
       if let target = variation.coreRootReferenceByNodeID[variation.currentNodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreStep")
@@ -796,7 +774,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     } else if !restoreCachedAnalysisForCurrentPosition() {
       clearVisibleAnalysisAndRefreshAnchor()
     }
-    saveSoon(reason: "jump")
+    persistence.saveSoon(reason: "jump")
     if coreBackendService != nil {
       if let target = variation.coreRootReferenceByNodeID[variation.currentNodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreJump")
@@ -817,7 +795,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     } else if !restoreCachedAnalysisForCurrentPosition() {
       clearVisibleAnalysisAndRefreshAnchor()
     }
-    saveSoon(reason: "variationJump")
+    persistence.saveSoon(reason: "variationJump")
     if coreBackendService != nil {
       if let target = variation.coreRootReferenceByNodeID[nodeID] {
         submitCoreMutation(.jumpToNode(target, expectedBackendEpoch: 0), reason: "coreVariationJump")
@@ -837,7 +815,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     let optimisticNodeID = variation.currentNodeID
     variation.coreRootReferenceByNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
-    saveSoon(reason: "passMove")
+    persistence.saveSoon(reason: "passMove")
     if coreBackendService != nil {
       submitCoreMutation(
         .playMove(
@@ -873,7 +851,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     let optimisticNodeID = variation.currentNodeID
     variation.coreRootReferenceByNodeID[optimisticNodeID] = .intent(intentID)
     clearBoardRecognitionPreview()
-    saveSoon(reason: "play")
+    persistence.saveSoon(reason: "play")
     if coreBackendService != nil {
       submitCoreMutation(
         .playMove(
@@ -967,15 +945,16 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     } else {
       var childMoves = boardMoves
       childMoves.append(move)
-      childRootCache = analysisByEngine[selectedEngine.rawValue]?[
-        positionCacheKey(
+      childRootCache = analysisCache.entry(
+        engine: selectedEngine,
+        cacheKey: positionCacheKey(
           engine: selectedEngine,
           moves: childMoves,
           setupStones: analysisSetupStones,
           komi: komi,
           rootNoise: rootNoise
         )
-      ]
+      )
     }
     return QixiNextMoveOverlayContext(
       x: x,
@@ -1074,7 +1053,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     assumesEngineAlreadyLoaded: Bool = true
   ) {
     guard selectedEngine != .none else {
-      saveSoon(reason: "analysisDisabled")
+      persistence.saveSoon(reason: "analysisDisabled")
       return
     }
     startAnalysis(
@@ -1150,7 +1129,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   func noteCoreMutationSucceeded(reason: String) {
-    saveSoon(reason: reason)
+    persistence.saveSoon(reason: reason)
   }
 
   func recordCoreRuntimeDiagnostic(event: String, success: Bool, message: String) {
@@ -1176,65 +1155,77 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   func saveNow(reason: String = "manual") {
-    saveTask?.cancel()
-    let snapshot = currentSnapshot(reason: reason)
-    do {
-      if reason == "launchReady" {
-        try persistIfRestorableStateChanged(snapshot)
-      } else {
-        try persist(snapshot)
-      }
-    } catch {
-      lastSaveError = String(describing: error)
-    }
+    persistence.saveNow(reason: reason)
+  }
+
+  func saveSoon(reason: String) {
+    persistence.saveSoon(reason: reason)
   }
 
   func handleLifecycleTombstone(reason: String) {
     memorySampler?.recordLifecycle(reason: reason)
-    let shouldQueueBackendCheckpoint = !enteredBackgroundSinceLastForeground
-    enteredBackgroundSinceLastForeground = true
-    saveTask?.cancel()
-    let snapshot = currentSnapshot(reason: reason)
-    do {
-      try persist(snapshot)
-      try QixiLifecycleTombstoneStore.mark(
-        snapshot: snapshot,
-        reason: reason,
-        engineTombstoneFilename: engineTombstoneFilenameIfSupported()
-      )
-      if coreBackendService != nil && shouldQueueBackendCheckpoint && !lifecycleCheckpointPending {
-        lifecycleCheckpointPending = true
-        let backgroundTask = QixiEngineTombstoneBackgroundTask(name: "QixiCoreCheckpoint") {}
-        let remaining = UIApplication.shared.backgroundTimeRemaining
-        let deadlineMs: UInt32 = remaining.isFinite
-          ? UInt32(max(0, min(Double(UInt32.max), remaining * 1_000)))
-          : 30_000
-        submitCoreMutation(
-          .enterBackground(deadlineMs: deadlineMs, expectedBackendEpoch: 0),
-          reason: "coreLifecycleCheckpoint",
-          completion: { [weak self] _ in
-            self?.lifecycleCheckpointPending = false
-            backgroundTask.end()
-          }
-        )
-      } else if coreBackendService == nil && shouldQueueBackendCheckpoint {
-        exportEngineTombstoneIfSupported(reason: reason)
-      }
-    } catch {
-      lastSaveError = String(describing: error)
-    }
+    persistence.handleLifecycleTombstone(reason: reason)
   }
 
   func handleLifecycleForeground() {
-    guard enteredBackgroundSinceLastForeground else { return }
-    enteredBackgroundSinceLastForeground = false
-    guard coreBackendService != nil else { return }
+    // Blocking chrome + core enterForeground are submitted via the host callback.
+    persistence.handleLifecycleForeground()
+  }
+
+  // MARK: - QixiPersistenceHost
+
+  var hasCoreBackend: Bool { coreBackendService != nil }
+
+  func notePersistenceError(_ message: String?) {
+    lastSaveError = message
+  }
+
+  func noteSyncResult(_ result: QixiSyncResult) {
+    let didUseICloud = QixiSyncStore.persistedICloudEnabled(afterSyncWith: result.provider)
+    setICloudSyncEnabled(didUseICloud)
+    syncStatus = QixiSyncStatus(
+      provider: result.provider,
+      lastSyncAt: didUseICloud ? Date() : nil,
+      lastError: didUseICloud ? nil : L10n.text(.syncErrorMessage)
+    )
+  }
+
+  func noteSyncMirrorFailure(_ message: String) {
+    syncStatus = QixiSyncStatus(
+      provider: syncStatus.provider,
+      lastSyncAt: syncStatus.lastSyncAt,
+      lastError: message
+    )
+  }
+
+  func applyImportedAppSnapshot(_ snapshot: QixiAppSnapshot) {
+    apply(snapshot: snapshot)
+    resumeAnalysisForImportedSnapshotIfNeeded()
+  }
+
+  func submitCoreAutosaveTick(reason: String) {
+    submitCoreMutation(
+      .autosaveTick(reason: reason, expectedBackendEpoch: 0),
+      reason: "corePeriodicAutosave"
+    )
+  }
+
+  func submitCoreEnterBackground(deadlineMs: UInt32, completion: @escaping @MainActor (Bool) -> Void) {
+    submitCoreMutation(
+      .enterBackground(deadlineMs: deadlineMs, expectedBackendEpoch: 0),
+      reason: "coreLifecycleCheckpoint",
+      completion: completion
+    )
+  }
+
+  func submitCoreEnterForeground(completion: @escaping @MainActor (Bool) -> Void) {
     let transitionToken = beginBackendTransition(.restoringState)
     submitCoreMutation(
       .enterForeground(expectedBackendEpoch: 0),
       reason: "coreLifecycleForeground",
-      completion: { [weak self] _ in
+      completion: { [weak self] ok in
         self?.finishBackendTransition(transitionToken)
+        completion(ok)
       }
     )
   }
@@ -1301,7 +1292,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
           result: result,
           reason: "manualSyncMCTSStatePackage"
         )
-        applySyncResultStatus(result)
+        noteSyncResult(result)
       } catch {
         if !wasSyncEnabled {
           setICloudSyncEnabled(false)
@@ -1333,7 +1324,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       }
     } else {
       setICloudSyncEnabled(false)
-      saveNow(reason: "onboardingCompleted")
+      persistence.saveNow(reason: "onboardingCompleted")
     }
   }
 
@@ -1367,8 +1358,8 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     resetVariationTree(from: mainLine, currentPly: currentPly)
     clearRecognizedSetup()
     clearVisibleAnalysisAndRefreshAnchor()
-    analysisByEngine = [:]
-    saveNow(reason: "newGame")
+    analysisCache.clear()
+    persistence.saveNow(reason: "newGame")
     if coreBackendService != nil {
       variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(.newGame(komi: komi, nextPla: .black, expectedBackendEpoch: 0), reason: "coreNewGame")
@@ -1388,9 +1379,9 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     resetVariationTree(from: importedMoves, currentPly: currentPly)
     clearRecognizedSetup()
     clearVisibleAnalysis()
-    analysisByEngine = [:]
+    analysisCache.clear()
     refreshLocalChartAnchor()
-    saveNow(reason: "sgfImport")
+    persistence.saveNow(reason: "sgfImport")
     if coreBackendService != nil {
       variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(
@@ -1424,9 +1415,9 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   func prepareMCTSStateExportPackage() async throws -> URL {
-    saveTask?.cancel()
+    persistence.cancelPendingSave()
     let snapshot = currentSnapshot(reason: "manualMCTSStateExport")
-    try persist(snapshot)
+    persistence.saveNow(reason: "manualMCTSStateExport")
     let packageURL = try await makeMCTSStatePackage(snapshot: snapshot, reason: "manualMCTSStateExport")
     lastSaveError = nil
     return packageURL
@@ -1560,7 +1551,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
         throw error
       }
       apply(snapshot: imported.snapshot)
-      try persist(imported.snapshot)
+      persistence.saveNow(reason: "mctsStateImport")
       try await submitCoreMutationAndWait(
         .setKomi(komi, expectedBackendEpoch: 0),
         reason: "coreMCTSStateImportKomi"
@@ -1579,7 +1570,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
           lastEngineError = localizedEngineError(error, fallbackKey: .engineErrorAnalysisFailed)
           hermesStatus = .offline
           lastSaveError = nil
-          saveSoon(reason: "mctsStateImportEngineUnavailable")
+          persistence.saveSoon(reason: "mctsStateImportEngineUnavailable")
           return
         }
       }
@@ -1592,7 +1583,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       } else {
         hermesStatus = .ready
       }
-      saveSoon(reason: "mctsStateImport")
+      persistence.saveSoon(reason: "mctsStateImport")
       return
     }
     var didRestoreEngineTombstone = false
@@ -1611,7 +1602,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       didRestoreEngineTombstone = true
     }
     apply(snapshot: imported.snapshot)
-    try persist(imported.snapshot)
+    persistence.saveNow(reason: "mctsStateImport")
 
     if didRestoreEngineTombstone {
       lastEngineError = nil
@@ -1624,7 +1615,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       lastSaveError = nil
       resumeAnalysisForImportedSnapshotIfNeeded()
     }
-    saveSoon(reason: "mctsStateImport")
+    persistence.saveSoon(reason: "mctsStateImport")
   }
 
   func installNativeModel(from url: URL) async throws -> NativeKataGoInstalledModel {
@@ -1704,7 +1695,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     selectedEngine = .none
     clearVisibleAnalysisAndRefreshAnchor()
     hermesStatus = .loading
-    saveNow(reason: "beforeModelInstall")
+    persistence.saveNow(reason: "beforeModelInstall")
     if coreBackendService != nil {
       try await submitCoreEngineSelectionAndWait(.none, reason: "coreModelInstallUnload")
     } else {
@@ -1719,7 +1710,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   ) {
     guard let engine else { return }
     selectedEngine = engine
-    saveNow(reason: "modelInstallFailed")
+    persistence.saveNow(reason: "modelInstallFailed")
     if didUnloadSelectedEngine {
       let transitionToken = beginBackendTransition(.switchingEngine)
       startAnalysis(
@@ -1782,7 +1773,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     resetVariationTree(from: mainLine, currentPly: currentPly)
     updateBoardMoveCache()
     clearVisibleAnalysisAndRefreshAnchor()
-    saveSoon(reason: "boardRecognitionApplied")
+    persistence.saveSoon(reason: "boardRecognitionApplied")
     if coreBackendService != nil {
       variation.coreRootReferenceByNodeID = [Self.variationRootID: .node(0)]
       submitCoreMutation(
@@ -1932,7 +1923,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       trigger: .analysis
     )
     if scheduleSave {
-      saveSoon(reason: "analysisApplied")
+      persistence.saveSoon(reason: "analysisApplied")
     }
     return true
   }
@@ -1994,7 +1985,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       cacheCurrentAnalysis(
         engine: selectedEngine,
         cacheKey: cacheKey,
-        positionKey: "core:\(snapshot.root)",
+        positionKey: cacheKey,
         visits: Int(clamping: snapshot.rootVisits)
       )
     }
@@ -2040,7 +2031,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     engine: AnalysisEngine,
     cacheKey: String
   ) -> String? {
-    guard let cached = analysisByEngine[engine.rawValue]?[cacheKey] else { return nil }
+    guard let cached = analysisCache.entry(engine: engine, cacheKey: cacheKey) else { return nil }
     let incomingRootVisits = responseRootVisits(response)
     if incomingRootVisits < cached.visits {
       return "root visits regressed incoming=\(incomingRootVisits) cached=\(cached.visits)"
@@ -2073,7 +2064,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     engine: AnalysisEngine,
     cacheKey: String
   ) -> String? {
-    guard analysisByEngine[engine.rawValue]?[cacheKey] == nil else { return nil }
+    guard analysisCache.entry(engine: engine, cacheKey: cacheKey) == nil else { return nil }
     let expectedCandidates = min(Self.realtimeAnalysisMinimumDisplayCandidates, legalMoveCountForCurrentRoot())
     guard expectedCandidates > 1 else { return nil }
     let incomingRootVisits = responseRootVisits(response)
@@ -2246,14 +2237,14 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     startAnalysis(engine: selectedEngine, assumesEngineAlreadyLoaded: false)
   }
 
-  private func engineTombstoneFilenameIfSupported() -> String? {
+  func engineTombstoneFilenameIfSupported() -> String? {
     if coreBackendService != nil { return nil }
     return (analysisService as? any QixiEngineTombstoneService) == nil
       ? nil
       : QixiEngineTombstoneStore.tombstoneFilename
   }
 
-  private func exportEngineTombstoneIfSupported(reason: String) {
+  func exportEngineTombstoneIfSupported(reason: String) {
     guard let engineTombstoneService = analysisService as? any QixiEngineTombstoneService else { return }
     let tombstoneURL = QixiEngineTombstoneStore.tombstoneURL
     let engine = selectedEngine
@@ -2452,63 +2443,13 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     }
   }
 
-  private func mirrorSnapshotToSync(_ snapshot: QixiAppSnapshot) {
-    guard !isAutomationSyncStatusPinned else { return }
-    syncTask?.cancel()
-    syncTask = Task { [weak self] in
-      guard let self else { return }
-      do {
-        guard currentSnapshot(reason: "syncMirrorProbe").hasSameRestorableState(as: snapshot) else { return }
-        let result = try QixiSyncStore.reconcile(localSnapshot: snapshot)
-        if let imported = result.importedSnapshot {
-          apply(snapshot: imported)
-          resumeAnalysisForImportedSnapshotIfNeeded()
-        }
-        applySyncResultStatus(result)
-      } catch {
-        syncStatus = QixiSyncStatus(
-          provider: syncStatus.provider,
-          lastSyncAt: syncStatus.lastSyncAt,
-          lastError: String(describing: error)
-        )
-      }
-    }
-  }
-
-  private var isAutomationSyncStatusPinned: Bool {
+  var isAutomationSyncStatusPinned: Bool {
     QixiPreferences.iCloudSyncEnabledAutomationOverride != nil ||
       ProcessInfo.processInfo.environment["QIXI_SYNC_STATUS"] != nil
   }
 
-  private func applySyncResultStatus(_ result: QixiSyncResult, syncedAt: Date = Date()) {
-    let didUseICloud = QixiSyncStore.persistedICloudEnabled(afterSyncWith: result.provider)
-    setICloudSyncEnabled(didUseICloud)
-    syncStatus = QixiSyncStatus(
-      provider: result.provider,
-      lastSyncAt: didUseICloud ? syncedAt : nil,
-      lastError: didUseICloud ? nil : L10n.text(.syncErrorMessage)
-    )
-  }
-
   private func localSnapshotForManualSync() throws -> QixiAppSnapshot? {
-    saveTask?.cancel()
-    let snapshot = currentSnapshot(reason: "manualSync")
-    guard let persisted = QixiSnapshotStore.load() else {
-      guard !isUntouchedLaunchDefaultState else {
-        lastSaveError = nil
-        return nil
-      }
-      try QixiSnapshotStore.save(snapshot)
-      lastSaveError = nil
-      return snapshot
-    }
-    guard !snapshot.hasSameRestorableState(as: persisted) else {
-      lastSaveError = nil
-      return persisted
-    }
-    try QixiSnapshotStore.save(snapshot)
-    lastSaveError = nil
-    return snapshot
+    try persistence.localSnapshotForManualSync(isUntouchedDefault: isUntouchedLaunchDefaultState)
   }
 
   private var isUntouchedLaunchDefaultState: Bool {
@@ -2520,7 +2461,11 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       showTerritory == false &&
       candidates.isEmpty &&
       territory.isEmpty &&
-      analysisByEngine.isEmpty
+      analysisCache.isEmpty
+  }
+
+  func buildAppSnapshot(reason: String) -> QixiAppSnapshot {
+    currentSnapshot(reason: reason)
   }
 
   private func currentSnapshot(reason: String) -> QixiAppSnapshot {
@@ -2533,24 +2478,8 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       recognizedSetupStones: recognizedSetupStones,
       komi: komi,
       showTerritory: showTerritory,
-      analysisByEngine: analysisByEngine
+      analysisByEngine: analysisCache.snapshotMap
     )
-  }
-
-  private func persist(_ snapshot: QixiAppSnapshot) throws {
-    try QixiSnapshotStore.save(snapshot)
-    lastSaveError = nil
-    if iCloudSyncEnabled {
-      mirrorSnapshotToSync(snapshot)
-    }
-  }
-
-  private func persistIfRestorableStateChanged(_ snapshot: QixiAppSnapshot) throws {
-    let didWrite = try QixiSnapshotStore.saveIfRestorableStateChanged(snapshot)
-    lastSaveError = nil
-    if didWrite && iCloudSyncEnabled {
-      mirrorSnapshotToSync(snapshot)
-    }
   }
 
   private func recordRuntimeDiagnostic(event: String, success: Bool, message: String) {
@@ -2580,31 +2509,6 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     UserDefaults.standard.set(enabled, forKey: QixiPreferences.iCloudSyncEnabledKey)
   }
 
-  private func startAutosaveTimer() {
-    autosaveTimer?.invalidate()
-    autosaveTimer = Timer.scheduledTimer(withTimeInterval: Self.autosaveInterval, repeats: true) { [weak self] _ in
-      Task { @MainActor in
-        guard let self else { return }
-        self.saveNow(reason: "periodicAutosave")
-        if self.coreBackendService != nil {
-          self.submitCoreMutation(
-            .autosaveTick(reason: "periodicAutosave", expectedBackendEpoch: 0),
-            reason: "corePeriodicAutosave"
-          )
-        }
-      }
-    }
-  }
-
-  private func saveSoon(reason: String) {
-    saveTask?.cancel()
-    saveTask = Task { [weak self] in
-      try? await Task.sleep(nanoseconds: Self.saveDebounceNanoseconds)
-      guard !Task.isCancelled else { return }
-      self?.saveNow(reason: reason)
-    }
-  }
-
   private func scheduleAnalysisRefresh(reason: String) {
     if coreBackendService != nil {
       analysisRefreshTask?.cancel()
@@ -2622,7 +2526,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     let engine = selectedEngine
     analysisRefreshTask?.cancel()
     analysisRefreshTask = Task { [weak self] in
-      try? await Task.sleep(nanoseconds: Self.saveDebounceNanoseconds)
+      try? await Task.sleep(nanoseconds: QixiPersistenceCoordinator.saveDebounceNanoseconds)
       guard !Task.isCancelled else { return }
       self?.refreshAnalysisIfEngineUnchanged(engine)
     }
@@ -2676,7 +2580,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
 
   @discardableResult
   private func restoreCachedAnalysis(engine: AnalysisEngine, cacheKey: String) -> Bool {
-    guard let cached = analysisByEngine[engine.rawValue]?[cacheKey] else { return false }
+    guard let cached = analysisCache.entry(engine: engine, cacheKey: cacheKey) else { return false }
     currentWinrate = cached.winrate
     currentScoreMean = cached.scoreMean
     candidates = cached.candidates
@@ -2685,9 +2589,9 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   private func cacheCurrentAnalysis(engine: AnalysisEngine, cacheKey: String, positionKey: String, visits: Int) {
-    var engineCache = analysisByEngine[engine.rawValue, default: [:]]
-    engineCache[cacheKey] = QixiCachedAnalysis(
-      savedAt: Date(),
+    analysisCache.put(
+      engine: engine,
+      cacheKey: cacheKey,
       positionKey: positionKey,
       winrate: currentWinrate,
       scoreMean: currentScoreMean,
@@ -2695,17 +2599,6 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       candidates: candidates,
       territory: territory
     )
-    if engineCache.count > Self.maxCachedPositionsPerEngine {
-      let overflow = engineCache.count - Self.maxCachedPositionsPerEngine
-      let keysToRemove = engineCache
-        .sorted { $0.value.savedAt < $1.value.savedAt }
-        .prefix(overflow)
-        .map(\.key)
-      for key in keysToRemove {
-        engineCache.removeValue(forKey: key)
-      }
-    }
-    analysisByEngine[engine.rawValue] = engineCache
   }
 
   // MARK: - Product OOM unload (QixiMemoryPressureHost)
@@ -2781,14 +2674,10 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   }
 
   private func trimAnalysisCacheForMemoryPressure() {
-    // Keep at most the current position entry for the active engine; drop the rest.
-    let currentKey = currentAnalysisCacheKey(for: selectedEngine)
-    var trimmed: [String: [String: QixiCachedAnalysis]] = [:]
-    if selectedEngine != .none, let currentKey,
-       let entry = analysisByEngine[selectedEngine.rawValue]?[currentKey] {
-      trimmed[selectedEngine.rawValue] = [currentKey: entry]
-    }
-    analysisByEngine = trimmed
+    analysisCache.trimToCurrent(
+      engine: selectedEngine,
+      cacheKey: currentAnalysisCacheKey(for: selectedEngine)
+    )
   }
 
   private func memoryTelemetryContext() -> QixiMemoryTelemetryContext {
@@ -2818,7 +2707,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       komi: komi,
       rootNoise: rootNoise
     )
-    return analysisByEngine[selectedEngine.rawValue]?[cacheKey]
+    return analysisCache.entry(engine: selectedEngine, cacheKey: cacheKey)
   }
 
   private func nativeEngineEvidenceForCurrentSelection(recordedAt: Date) throws -> QixiRealDeviceEvidence.NativeEngine? {
@@ -3130,7 +3019,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
 
   private func apply(snapshot: QixiAppSnapshot) {
     isApplyingSnapshot = true
-    saveTask?.cancel()
+    persistence.cancelPendingSave()
     invalidateActiveAnalysisForPositionChange()
     defer { isApplyingSnapshot = false }
     let restoredSetupStones = Self.normalizedSetupStones(snapshot.recognizedSetupStones ?? [])
@@ -3144,7 +3033,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     resetVariationTree(from: restoredMainLine, currentPly: currentPly)
     selectedEngine = snapshot.selectedEngine
     showTerritory = snapshot.showTerritory
-    analysisByEngine = snapshot.analysisByEngine
+    analysisCache.replaceAll(snapshot.analysisByEngine)
     clearBoardRecognitionPreview()
     if selectedEngine == .none {
       clearVisibleAnalysisAndRefreshAnchor()
@@ -3160,7 +3049,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     komi: Double,
     rootNoise: Double
   ) -> String {
-    QixiPositionIdentity.cacheKey(
+    QixiAnalysisCache.cacheKey(
       engine: engine,
       moves: moves,
       setupStones: setupStones,
