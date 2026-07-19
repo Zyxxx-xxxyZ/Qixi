@@ -977,17 +977,20 @@ def run_static_checks() -> None:
   runbook = read(RUNBOOK)
   quality_doc = read(QUALITY_DOC)
 
-  if info.get("QixiAnalysisRuntime") != "httpBridge":
+  if info.get("QixiAnalysisRuntime") != "nativeInProcess":
     raise DeviceRunPreflightError(
-      "development device run preflight expects QixiAnalysisRuntime=httpBridge until native KataGo is linked"
+      "development device run preflight expects QixiAnalysisRuntime=nativeInProcess (product path)"
     )
-  if info.get("QixiBackendBaseURL") != "http://127.0.0.1:8765":
+  # Product runtime is nativeInProcess. Backend URL keys are optional legacy hooks
+  # retained for optional Mac-hosted bridge smoke only.
+  backend_base = info.get("QixiBackendBaseURL")
+  if backend_base not in (None, "", "http://127.0.0.1:8765"):
     raise DeviceRunPreflightError(
-      "simulator default backend URL should stay explicit; physical devices must override it with QIXI_DEVICE_BACKEND_URL"
+      "QixiBackendBaseURL must be unset or http://127.0.0.1:8765 for simulator defaults"
     )
   ats = info.get("NSAppTransportSecurity")
   if not isinstance(ats, dict) or ats.get("NSAllowsLocalNetworking") is not True:
-    raise DeviceRunPreflightError("Info.plist must allow local networking for physical-device backend smoke tests")
+    raise DeviceRunPreflightError("Info.plist must allow local networking for optional device bridge smoke tests")
   if not info.get("NSLocalNetworkUsageDescription"):
     raise DeviceRunPreflightError("Info.plist must explain local-network access")
   if "TARGETED_DEVICE_FAMILY = \"1,2\";" not in project:

@@ -9,7 +9,7 @@ struct SGFImportSheet<Host: QixiOpenSheetHost & ObservableObject>: View {
   @State private var activeImporter: OpenImporterKind?
   @State private var status: String = ""
   @State private var visualState: ImportSheetVisualState = .idle
-  @State private var items: [QixiSyncStore.ArchiveListItem] = []
+  @State private var items: [QixiArchiveListItem] = []
   @State private var thumbnails: [String: UIImage] = [:]
   @State private var isRefreshing = false
 
@@ -106,7 +106,7 @@ struct SGFImportSheet<Host: QixiOpenSheetHost & ObservableObject>: View {
   }
 
   @ViewBuilder
-  private func thumbnailView(for item: QixiSyncStore.ArchiveListItem) -> some View {
+  private func thumbnailView(for item: QixiArchiveListItem) -> some View {
     Group {
       if let image = thumbnails[item.id] {
         Image(uiImage: image)
@@ -150,7 +150,7 @@ struct SGFImportSheet<Host: QixiOpenSheetHost & ObservableObject>: View {
     }
   }
 
-  private func openListItem(_ item: QixiSyncStore.ArchiveListItem) {
+  private func openListItem(_ item: QixiArchiveListItem) {
     Task { @MainActor in
       if host.isBackendInteractionBlocked {
         status = L10n.text(.openBusyHint)

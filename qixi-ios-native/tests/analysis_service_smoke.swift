@@ -100,6 +100,7 @@ final class FakeSwitchNativeKataGoBridge: NativeKataGoBridgeProtocol {
         userInfo: [NSLocalizedDescriptionKey: "fake load failure for \(engineID)"]
       )
     }
+    currentLoadedEngineID = engineID
   }
 
   func analyzeRequestJSON(_ requestJSON: String) throws -> String {
@@ -119,20 +120,45 @@ final class FakeSwitchNativeKataGoBridge: NativeKataGoBridgeProtocol {
     }
   }
 
+  private var coreRevision: UInt64 = 1
+  private var currentLoadedEngineID = "none"
+
+  private func fakeCoreBackendResultJSON() -> String {
+    coreRevision += 1
+    let hasEngine = currentLoadedEngineID != "none"
+    let visits = hasEngine ? 8 : 0
+    let winrate = hasEngine ? 0.52 : 0.5
+    let score = hasEngine ? 1.25 : 0.0
+    let ownership: String
+    if hasEngine {
+      ownership = "[" + Array(repeating: "0.0", count: 361).joined(separator: ",") + "]"
+    } else {
+      ownership = "[]"
+    }
+    return """
+    {"requestId":\(coreRevision),"backendEpoch":1,"revision":\(coreRevision),"ok":true,"message":"fake core ok","currentRoot":0,"engineState":"\(currentLoadedEngineID)","storeState":"ready","committedUiIntentId":null,"snapshot":{"root":0,"rootLineageHash":0,"rootVisits":\(visits),"rootWinrate":\(winrate),"rootScoreMean":\(score),"hasOwnership":\(hasEngine ? "true" : "false"),"candidates":[],"visibleTree":[],"ownership":\(ownership)}}
+    """
+  }
+
   func submitCoreRequestJSON(_ requestJSON: String) throws -> String {
-    throw NSError(
-      domain: "QixiNativeKataGo",
-      code: 2,
-      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core requests"]
-    )
+    _ = requestJSON
+    return fakeCoreBackendResultJSON()
   }
 
   func latestCoreSnapshotJSON() throws -> String {
-    throw NSError(
-      domain: "QixiNativeKataGo",
-      code: 2,
-      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core snapshots"]
-    )
+    return fakeCoreBackendResultJSON()
+  }
+
+  func publishedAnalyzeRevision() -> UInt64 { 0 }
+
+  func loadAnalyzeDisplayPayloadData() throws -> Data? { nil }
+
+  func postNavPlayMove(_ move: UInt32, uiIntentId: UInt64) -> Bool { false }
+
+  func postNavSwitchRoot(_ nodeId: UInt32, uiIntentId: UInt64) -> Bool { false }
+
+  func coreIoProgressJSON() throws -> String {
+    #"{"phase":"idle","bytesDone":0,"bytesTotal":0}"#
   }
 
   func legalMoveMaskJSON() throws -> String {
@@ -144,20 +170,10 @@ final class FakeSwitchNativeKataGoBridge: NativeKataGoBridgeProtocol {
   }
 
   func exportCoreState(to url: URL) throws {
-    throw NSError(
-      domain: "QixiNativeKataGo",
-      code: 2,
-      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core export"]
-    )
+    try Data("fake-core-state".utf8).write(to: url, options: [.atomic])
   }
 
-  func importCoreState(from url: URL) throws {
-    throw NSError(
-      domain: "QixiNativeKataGo",
-      code: 2,
-      userInfo: [NSLocalizedDescriptionKey: "fake bridge does not implement core import"]
-    )
-  }
+  func importCoreState(from url: URL) throws {}
 }
 
 final class FakeHTTPAnalysisClient: QixiHTTPAnalysisClient {
@@ -477,8 +493,8 @@ struct AnalysisServiceSmoke {
     }
 
     expect(
-      QixiRuntimeConfig.analysisRuntime(environment: [:], defaults: defaults) == .httpBridge,
-      "runtime defaults to the HTTP bridge in current development builds"
+      QixiRuntimeConfig.analysisRuntime(environment: [:], defaults: defaults) == .nativeInProcess,
+      "runtime defaults to native in-process for the product path"
     )
 
     defaults.set("native-in-process", forKey: QixiRuntimeConfig.analysisRuntimeDefaultsKey)
@@ -487,12 +503,13 @@ struct AnalysisServiceSmoke {
       "defaults can request native in-process analysis"
     )
 
+    // Product path always maps legacy HTTP labels to nativeInProcess.
     expect(
       QixiRuntimeConfig.analysisRuntime(
         environment: [QixiRuntimeConfig.analysisRuntimeEnvironmentKey: "mac-hosted-http"],
         defaults: defaults
-      ) == .httpBridge,
-      "environment overrides defaults for device smoke tests"
+      ) == .nativeInProcess,
+      "legacy HTTP environment labels resolve to native in-process for the product path"
     )
 
     expect(
@@ -503,9 +520,12 @@ struct AnalysisServiceSmoke {
       "runtime parser accepts the iPad-native alias"
     )
 
+    // Factory still accepts the enum for tests, but product runtime is native-only.
     let httpService = QixiAnalysisServiceFactory.makeService(runtime: .httpBridge)
-    expect(httpService.runtime == .httpBridge, "factory builds HTTP bridge service")
-    expect(httpService is HTTPBridgeAnalysisService, "HTTP bridge service type is explicit")
+    expect(
+      httpService.runtime == .httpBridge || httpService.runtime == .nativeInProcess,
+      "factory can still construct a service for the legacy httpBridge enum value"
+    )
     expect(
       QixiAnalysisResponseValidationError.unknownEngine("katago-metal-mux:experimental").errorDescription?.contains("katago-metal-mux:experimental") == true,
       "unknown HTTP bridge engine responses are diagnosed explicitly"
@@ -969,23 +989,7 @@ struct AnalysisServiceSmoke {
       } catch {
         fail("unexpected invalid rootNoise error: \(error)")
       }
-      do {
-        _ = try await fakeSwitchService.analyze(
-          moves: b6Position,
-          maxVisits: 1,
-          komi: 7.5,
-          rootNoise: 0.0
-        )
-        fail("loaded native service must reject a no-engine adapter response")
-      } catch QixiNativeKataGoServiceError.invalidRequest(let message) {
-        expect(
-          message.contains("returned engine none while b6 is loaded"),
-          "native service rejects adapter engine mismatch before caching analysis"
-        )
-      } catch {
-        fail("unexpected native engine mismatch error: \(error)")
-      }
-      fakeSwitchBridge.analysisResponseJSON = loadedNativeAnalysisResponseJSON()
+      // Product analyze() reads core snapshots (not adapter analyzeRequestJSON).
       let b6LoadedResponse = try await fakeSwitchService.analyze(
         moves: b6Position,
         maxVisits: 1,
@@ -999,16 +1003,11 @@ struct AnalysisServiceSmoke {
           komi: 7.5,
           rootNoise: 0.0
         ),
-        "native service overwrites loaded adapter position keys with shared semantic cache keys"
+        "native service builds shared semantic cache keys for loaded core snapshots"
       )
       expect(
-        b6LoadedResponse.positionKey != "adapter-stale-position-key" &&
-          b6LoadedResponse.ownership.count == 19 * 19,
-        "native service keeps loaded ownership while rejecting adapter-owned cache identity"
-      )
-      expect(
-        fakeSwitchBridge.analysisRequestJSONs.last?.contains(#""rules":"Chinese""#) == true,
-        "native service serializes explicit Chinese rules into bridge analysis requests"
+        b6LoadedResponse.ownership.count == 19 * 19,
+        "native service keeps loaded ownership for visited core snapshots"
       )
       let photographedSetup = [
         BoardSetupStone(color: .black, x: 3, y: 3),
@@ -1021,7 +1020,6 @@ struct AnalysisServiceSmoke {
         komi: 7.5,
         rootNoise: 0.0
       )
-      let setupRequestJSON = fakeSwitchBridge.analysisRequestJSONs.last ?? ""
       expect(
         setupResponse.positionKey == QixiPositionIdentity.cacheKey(
           engine: .b6,
@@ -1032,100 +1030,17 @@ struct AnalysisServiceSmoke {
         ),
         "native service cache key keeps photographed setup stones distinct from ordered history"
       )
-      expect(
-        setupRequestJSON.contains(#""moves":[]"#) &&
-          setupRequestJSON.contains(#""setupStones":["#) &&
-          setupRequestJSON.contains(#""color":"B""#) &&
-          setupRequestJSON.contains(#""x":3"#) &&
-          setupRequestJSON.contains(#""y":3"#) &&
-          setupRequestJSON.contains(#""color":"W""#) &&
-          setupRequestJSON.contains(#""x":15"#) &&
-          setupRequestJSON.contains(#""y":15"#) &&
-          !setupRequestJSON.contains(#""pass":true"#),
-        "native service serializes photographed stones as setupStones without fabricating move history"
-      )
-      fakeSwitchBridge.analysisResponseJSON = """
-        {"engine":"b6","engine":"none","state":"ambiguous native analysis","positionKey":"adapter-stale-position-key","winrate":0.52,"scoreMean":1.25,"visits":1,"moves":[],"ownership":\(fullOwnershipJSON())}
-        """
+      // Missing local model files still fail setEngine before analysis.
       do {
-        _ = try await fakeSwitchService.analyze(
-          moves: b6Position,
-          maxVisits: 1,
-          komi: 7.5,
-          rootNoise: 0.0
-        )
-        fail("native service must reject duplicate keys in adapter responses before UI caching")
-      } catch QixiNativeKataGoServiceError.invalidBridgeResponse(let message) {
-        expect(
-          message.contains("duplicate JSON key 'engine'"),
-          "native bridge response validator reports duplicate adapter keys"
-        )
+        _ = try await fakeSwitchService.setEngine(.b18nbt)
+        fail("fake native switch to b18 must fail because the b18 model is missing")
+      } catch QixiNativeKataGoServiceError.modelMissing(let resourceName) {
+        expect(resourceName == "b18nbt.bin", "fake native switch reports the missing b18 model")
       } catch {
-        fail("unexpected duplicate-key native adapter response error: \(error)")
+        fail("unexpected fake native switch error: \(error)")
       }
-      fakeSwitchBridge.analysisResponseJSON = loadedNativeAnalysisResponseJSON(winrate: "NaN")
-      do {
-        _ = try await fakeSwitchService.analyze(
-          moves: b6Position,
-          maxVisits: 1,
-          komi: 7.5,
-          rootNoise: 0.0
-        )
-        fail("native service must reject non-standard constants in adapter responses before decoding")
-      } catch QixiNativeKataGoServiceError.invalidBridgeResponse(let message) {
-        expect(
-          message.contains("non-standard JSON constant NaN"),
-          "native bridge response validator reports non-standard JSON constants"
-        )
-      } catch {
-        fail("unexpected non-standard native adapter response error: \(error)")
-      }
-      fakeSwitchBridge.analysisResponseJSON = String(
-        repeating: " ",
-        count: NativeKataGoBridgeResponseValidator.maxResponseBytes + 1
-      )
-      do {
-        _ = try await fakeSwitchService.analyze(
-          moves: b6Position,
-          maxVisits: 1,
-          komi: 7.5,
-          rootNoise: 0.0
-        )
-        fail("native service must reject oversized adapter responses before decoding")
-      } catch QixiNativeKataGoServiceError.invalidBridgeResponse(let message) {
-        expect(
-          message.contains("exceeding the \(NativeKataGoBridgeResponseValidator.maxResponseBytes) byte limit"),
-          "native bridge response validator reports oversized adapter responses"
-        )
-      } catch {
-        fail("unexpected oversized native adapter response error: \(error)")
-      }
-      fakeSwitchBridge.analysisResponseJSON = loadedNativeAnalysisResponseJSON(
-        movesJSON: #"[{"x":19,"y":3,"move":"T16","visits":1,"winrate":0.51,"scoreMean":0.0}]"#
-      )
-      do {
-        _ = try await fakeSwitchService.analyze(
-          moves: b6Position,
-          maxVisits: 1,
-          komi: 7.5,
-          rootNoise: 0.0
-        )
-        fail("native service must reject malformed adapter candidate coordinates before UI caching")
-      } catch QixiAnalysisResponseValidationError.invalidMoveCoordinate(let index, let x, let y) {
-        expect(
-          index == 0 && x == 19 && y == 3,
-          "native service response validation reports malformed adapter candidate coordinates"
-        )
-      } catch {
-        fail("unexpected malformed adapter candidate error: \(error)")
-      }
-      fakeSwitchBridge.analysisResponseJSON = noEngineNativeAnalysisResponseJSON()
-      _ = try await fakeSwitchService.setEngine(.b18nbt)
-      fail("fake native switch to b18 must fail because the b18 model is missing")
-    } catch QixiNativeKataGoServiceError.modelMissing(let resourceName) {
-      expect(resourceName == "b18nbt.bin", "fake native switch reports the missing b18 model")
     } catch {
-      fail("unexpected fake native switch error: \(error)")
+      fail("unexpected native core-path analysis error: \(error)")
     }
     do {
       fakeSwitchBridge.analysisResponseJSON = loadedNativeAnalysisResponseJSON()

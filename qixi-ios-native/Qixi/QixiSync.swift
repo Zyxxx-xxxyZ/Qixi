@@ -407,19 +407,13 @@ enum QixiSyncStore {
     return ubiquityRoot.appendingPathComponent(archivesDirectoryRelativePath, isDirectory: true)
   }
 
-  /// One list row for Open: only `.qixi.png` (and legacy package suffixes).
-  struct ArchiveListItem: Identifiable, Equatable {
-    var id: String { url.standardizedFileURL.path }
-    var url: URL
-    var displayName: String
-    var sortDate: Date
-    var isICloud: Bool
-  }
+  /// Back-compat alias; canonical type lives in `QixiModels` as `QixiArchiveListItem`.
+  typealias ArchiveListItem = QixiArchiveListItem
 
   /// Local + iCloud (when the ubiquity container is available) `.qixi.png` packages, newest first.
   /// No user enablement flag — R/W on the app container does not require in-app authorization.
-  static func listArchivePackages() -> [ArchiveListItem] {
-    var items: [ArchiveListItem] = []
+  static func listArchivePackages() -> [QixiArchiveListItem] {
+    var items: [QixiArchiveListItem] = []
     var seen = Set<String>()
 
     func appendPackages(in directory: URL, isICloud: Bool) {
@@ -439,7 +433,7 @@ enum QixiSyncStore {
         let date = values?.contentModificationDate ?? values?.creationDate ?? .distantPast
         let base = displayNameWithoutPackageExtension(name)
         items.append(
-          ArchiveListItem(
+          QixiArchiveListItem(
             url: url,
             displayName: base,
             sortDate: date,
@@ -561,14 +555,7 @@ enum QixiSyncStore {
   }
 
   static func sanitizeFileBaseName(_ raw: String) -> String {
-    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>\n\r\t")
-    let cleaned = trimmed
-      .components(separatedBy: forbidden)
-      .joined(separator: "-")
-      .trimmingCharacters(in: CharacterSet(charactersIn: " .-"))
-    let limited = String(cleaned.prefix(80))
-    return limited.isEmpty ? defaultArchiveBaseName(date: Date()) : limited
+    QixiMCTSStatePackageStore.sanitizeFileBaseName(raw)
   }
 
   static func defaultArchiveBaseName(date: Date = Date()) -> String {

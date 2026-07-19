@@ -375,7 +375,7 @@ for token in (
   "SUPPORTS_MACCATALYST = NO;",
   "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;",
   "MARKETING_VERSION = 1.0;",
-  "CURRENT_PROJECT_VERSION = 1;",
+  "CURRENT_PROJECT_VERSION = 14;",
 ):
   if token not in project:
     fail(f"project build setting missing: {token}")

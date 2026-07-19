@@ -21,9 +21,9 @@ protocol QixiOpenSheetHost: AnyObject {
   func openSGF(text: String) async throws
   func openMCTSStatePackage(from packageURL: URL, originURL: URL?) async throws
   /// In-app archive list (local + iCloud `.qixi.png`).
-  func listOpenableArchivePackages() -> [QixiSyncStore.ArchiveListItem]
+  func listOpenableArchivePackages() -> [QixiArchiveListItem]
   /// Open a list item (may prompt for unsaved changes via host).
-  func openArchiveListItem(_ item: QixiSyncStore.ArchiveListItem) async throws
+  func openArchiveListItem(_ item: QixiArchiveListItem) async throws
 }
 
 // MARK: - Archive

@@ -355,12 +355,33 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
             : coreResult.message
         )
       }
+      let engine = loadCurrentEngine()
       guard let snapshot = coreResult.snapshot else {
+        // No-engine (or pre-first-playout) may have an empty structure snapshot.
+        if engine == .none {
+          let idle = AnalysisResponse(
+            engine: AnalysisEngine.none.rawValue,
+            state: "no engine loaded",
+            positionKey: QixiPositionIdentity.cacheKey(
+              engine: .none,
+              moves: moves,
+              setupStones: setupStones,
+              komi: komi,
+              rootNoise: rootNoise
+            ),
+            winrate: nil,
+            scoreMean: nil,
+            visits: 0,
+            moves: [],
+            ownership: []
+          )
+          try QixiAnalysisResponseValidator.validate(idle, expectedEngine: AnalysisEngine.none)
+          return idle
+        }
         throw QixiNativeKataGoServiceError.invalidRequest(
           "Core MCTS snapshot is empty; wait for background playouts."
         )
       }
-      let engine = loadCurrentEngine()
       let response = Self.analysisResponse(
         from: snapshot,
         engine: engine,
@@ -401,15 +422,19 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
         scoreMean: candidate.scoreMean
       )
     }
-    var ownership = snapshot.ownership
-    if ownership.count < 361 {
-      ownership.append(contentsOf: Array(repeating: 0.0, count: 361 - ownership.count))
-    } else if ownership.count > 361 {
-      ownership = Array(ownership.prefix(361))
+    var ownership: [Double] = []
+    // No-engine / zero-visit snapshots must keep empty ownership so validators treat them as idle.
+    if engine != .none, snapshot.rootVisits > 0, snapshot.hasOwnership || !snapshot.ownership.isEmpty {
+      ownership = snapshot.ownership
+      if ownership.count < 361 {
+        ownership.append(contentsOf: Array(repeating: 0.0, count: 361 - ownership.count))
+      } else if ownership.count > 361 {
+        ownership = Array(ownership.prefix(361))
+      }
     }
     return AnalysisResponse(
       engine: engine.rawValue,
-      state: "running native core MCTS analysis",
+      state: engine == .none ? "no engine loaded" : "running native core MCTS analysis",
       positionKey: QixiPositionIdentity.cacheKey(
         engine: engine,
         moves: moves,

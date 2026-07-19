@@ -17,6 +17,7 @@ swiftc \
   "$NATIVE_DIR/Qixi/QixiModels.swift" \
   "$NATIVE_DIR/Qixi/QixiPositionIdentity.swift" \
   "$NATIVE_DIR/Qixi/QixiPersistence.swift" \
+  "$NATIVE_DIR/Qixi/QixiBoardThumbnail.swift" \
   "$NATIVE_DIR/Qixi/QixiSync.swift" \
   "$NATIVE_DIR/Qixi/QixiNativeModelIntegrity.swift" \
   "$NATIVE_DIR/Qixi/QixiNativeModelInstallReceipt.swift" \

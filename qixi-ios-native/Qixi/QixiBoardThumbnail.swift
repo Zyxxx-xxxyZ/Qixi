@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Renders a simple final-position board thumbnail for archive previews / package icons.
 enum QixiBoardThumbnailRenderer {
@@ -14,6 +17,7 @@ enum QixiBoardThumbnailRenderer {
     return Array(mainLine.prefix(ply))
   }
 
+  #if canImport(UIKit)
   static func render(
     moves: [BoardMove],
     setupStones: [BoardSetupStone] = [],
@@ -88,6 +92,7 @@ enum QixiBoardThumbnailRenderer {
   ) -> Data? {
     render(moves: moves, setupStones: setupStones, pixelSize: pixelSize).pngData()
   }
+  #endif
 
   /// Best-effort package icon stamp for destinations that honor custom file icons.
   /// On iOS, `URLResourceValues.thumbnailDictionary` is get-only, so the durable

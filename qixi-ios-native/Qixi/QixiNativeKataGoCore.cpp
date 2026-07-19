@@ -2228,13 +2228,20 @@ bool NativeKataGoCore::selectCoreEngine(
 }
 
 NativeKataGoResult NativeKataGoCore::analyzeRequestJSON(const std::string& requestJSON) {
-  // Search is core::MCTSStore only. The legacy KataGo Search analyze path is disabled.
-  // Callers must use submitCoreRequestJSON / latestCoreSnapshotJSON.
-  (void)requestJSON;
-  return invalidRequestResult(
-    "Native in-process analysis uses core::MCTSStore only; "
-    "analyzeRequestJSON is disabled. Use submitCoreRequest / latestCoreSnapshot."
-  );
+  // Product UI search is core::MCTSStore via submitCoreRequest / latestCoreSnapshot.
+  // This entry point remains for:
+  // - no-engine synthetic diagnostics
+  // - adapter contract smoke / FakeNativeKataGoEngine tests
+  // It must not reintroduce stock KataGo Search trees.
+  NativeKataGoAnalysisRequest request{};
+  NativeKataGoResult parseResult = parseNativeKataGoAnalysisRequestJSON(requestJSON, request);
+  if(!parseResult.ok())
+    return parseResult;
+  if(loadedEngineID == "none")
+    return noEngineAnalysisResult(request);
+  if(engine == nullptr)
+    return invalidRequestResult("Native KataGo engine adapter is missing.");
+  return validateAdapterAnalysisResult(engine->analyzeRequest(request), loadedEngineID);
 }
 
 NativeKataGoResult NativeKataGoCore::exportTombstoneToFile(const std::string& filePath) {

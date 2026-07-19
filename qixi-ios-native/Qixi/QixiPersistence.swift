@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct QixiCachedAnalysis: Codable, Equatable {
   var savedAt: Date
@@ -1055,13 +1057,17 @@ enum QixiSnapshotStore {
     }
 
     let afterRootNoiseMarker = String(afterPrefix[rootNoiseRange.upperBound...])
-    let rootNoiseBits: String
+    // Format: <rootNoiseBits>|pdaBits:<pdaBits>|history:...  (optional |setup:/|next: before history)
+    guard let pdaRange = afterRootNoiseMarker.range(of: "|pdaBits:") else { return nil }
+    let rootNoiseBits = String(afterRootNoiseMarker[..<pdaRange.lowerBound])
+    let afterPdaMarker = String(afterRootNoiseMarker[pdaRange.upperBound...])
     let setupStones: [BoardSetupStone]
     let nextPlayer: StoneColor?
     let history: String
-    if let setupRange = afterRootNoiseMarker.range(of: "|setup:") {
-      rootNoiseBits = String(afterRootNoiseMarker[..<setupRange.lowerBound])
-      let afterSetupMarker = String(afterRootNoiseMarker[setupRange.upperBound...])
+    let pdaBits: String
+    if let setupRange = afterPdaMarker.range(of: "|setup:") {
+      pdaBits = String(afterPdaMarker[..<setupRange.lowerBound])
+      let afterSetupMarker = String(afterPdaMarker[setupRange.upperBound...])
       guard let nextRange = afterSetupMarker.range(of: "|next:") else { return nil }
       guard let historyRange = afterSetupMarker.range(of: "|history:") else { return nil }
       guard nextRange.lowerBound < historyRange.lowerBound else { return nil }
@@ -1077,16 +1083,23 @@ enum QixiSnapshotStore {
       nextPlayer = decodedNextPlayer
       history = String(afterSetupMarker[historyRange.upperBound...])
     } else {
-      guard let historyRange = afterRootNoiseMarker.range(of: "|history:") else { return nil }
-      rootNoiseBits = String(afterRootNoiseMarker[..<historyRange.lowerBound])
+      guard let historyRange = afterPdaMarker.range(of: "|history:") else { return nil }
+      pdaBits = String(afterPdaMarker[..<historyRange.lowerBound])
       setupStones = []
       nextPlayer = nil
-      history = String(afterRootNoiseMarker[historyRange.upperBound...])
+      history = String(afterPdaMarker[historyRange.upperBound...])
     }
     guard let rootNoise = decodedCanonicalDoubleBits(rootNoiseBits),
           QixiAnalysisLimits.isValidRootNoise(rootNoise) else {
       return nil
     }
+    // pdaBits is part of the key; accept any finite double bit pattern in range used by UI.
+    guard let pda = decodedCanonicalDoubleBits(pdaBits),
+          pda.isFinite,
+          abs(pda) <= 10.0 else {
+      return nil
+    }
+    _ = pda
 
     guard !history.contains("|"),
           let moves = decodedHistory(history) else {
@@ -1390,9 +1403,26 @@ enum QixiMCTSStatePackageStore {
   static let imageDocumentMagic = Data("QIXIMC01".utf8)
   static let imageDocumentMaxBytes: UInt64 = 768 * 1024 * 1024
 
+  static func sanitizeFileBaseName(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>\n\r\t")
+    let cleaned = trimmed
+      .components(separatedBy: forbidden)
+      .joined(separator: "-")
+      .trimmingCharacters(in: CharacterSet(charactersIn: " .-"))
+    let limited = String(cleaned.prefix(80))
+    if limited.isEmpty {
+      let formatter = DateFormatter()
+      formatter.locale = Locale(identifier: "en_US_POSIX")
+      formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+      return "Qixi \(formatter.string(from: Date()))"
+    }
+    return limited
+  }
+
   static func freshTemporaryPackageURL(baseName: String? = nil) throws -> URL {
     let leaf = baseName.flatMap { name -> String? in
-      let cleaned = QixiSyncStore.sanitizeFileBaseName(name)
+      let cleaned = sanitizeFileBaseName(name)
       return cleaned.isEmpty ? nil : cleaned
     } ?? "qixi-state-\(UUID().uuidString)"
     let url = FileManager.default.temporaryDirectory
@@ -1595,6 +1625,7 @@ enum QixiMCTSStatePackageStore {
   }
 
   /// Board preview for Open list rows (directory package, sealed image document, or plain PNG).
+  #if canImport(UIKit)
   static func previewThumbnailImage(from packageURL: URL, maxPixelSize: CGFloat = 160) -> UIImage? {
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDirectory) else {
@@ -1633,6 +1664,7 @@ enum QixiMCTSStatePackageStore {
       image.draw(in: CGRect(origin: .zero, size: size))
     }
   }
+  #endif
 
   static func quickLookDirectoryURL(in packageURL: URL) -> URL {
     packageURL.appendingPathComponent(quickLookDirectoryName, isDirectory: true)

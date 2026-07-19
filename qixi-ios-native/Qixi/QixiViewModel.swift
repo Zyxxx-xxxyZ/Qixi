@@ -3010,12 +3010,12 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
 
   // MARK: - Open list / Archive / Export
 
-  func listOpenableArchivePackages() -> [QixiSyncStore.ArchiveListItem] {
+  func listOpenableArchivePackages() -> [QixiArchiveListItem] {
     // Always include iCloud archives when the ubiquity container is available.
     QixiSyncStore.listArchivePackages()
   }
 
-  func openArchiveListItem(_ item: QixiSyncStore.ArchiveListItem) async throws {
+  func openArchiveListItem(_ item: QixiArchiveListItem) async throws {
     if sessionHasUnsavedChanges {
       pendingUnsavedDecision = QixiUnsavedChangesDecision(kind: .openArchive(item))
       return
@@ -3023,7 +3023,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     try await performOpenArchiveListItem(item)
   }
 
-  private func performOpenArchiveListItem(_ item: QixiSyncStore.ArchiveListItem) async throws {
+  private func performOpenArchiveListItem(_ item: QixiArchiveListItem) async throws {
     try? FileManager.default.startDownloadingUbiquitousItem(at: item.url)
     var localCopy: URL?
     defer { QixiImportedFileAccess.removeTemporaryCopy(localCopy) }

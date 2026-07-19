@@ -95,10 +95,10 @@ class DeviceRunPreflightTests(unittest.TestCase):
       directory = pathlib.Path(tmpdir)
       plist_path = directory / "Info.plist"
       with plist_path.open("wb") as plist_file:
-        plistlib.dump({"QixiAnalysisRuntime": "httpBridge"}, plist_file)
+        plistlib.dump({"QixiAnalysisRuntime": "nativeInProcess"}, plist_file)
       self.assertEqual(
         preflight.load_plist(plist_path, "test plist")["QixiAnalysisRuntime"],
-        "httpBridge",
+        "nativeInProcess",
       )
 
       source_path = directory / "source.txt"
@@ -107,7 +107,7 @@ class DeviceRunPreflightTests(unittest.TestCase):
 
       linked_target = directory / "target.plist"
       with linked_target.open("wb") as plist_file:
-        plistlib.dump({"QixiAnalysisRuntime": "httpBridge"}, plist_file)
+        plistlib.dump({"QixiAnalysisRuntime": "nativeInProcess"}, plist_file)
       linked_path = directory / "linked.plist"
       try:
         linked_path.symlink_to(linked_target)

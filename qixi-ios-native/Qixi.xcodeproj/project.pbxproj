@@ -49,9 +49,6 @@
 		100000000000000000000125 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022C /* CoreML.framework */; };
 		100000000000000000000126 /* MetalPerformanceShaders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022D /* MetalPerformanceShaders.framework */; };
 		100000000000000000000127 /* MetalPerformanceShadersGraph.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022E /* MetalPerformanceShadersGraph.framework */; };
-		100000000000000000000128 /* g170-b6c96-s175395328-d26788732.bin.gz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */; };
-		100000000000000000000129 /* b18nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* b18nbt.bin */; };
-		10000000000000000000012A /* b28nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000231 /* b28nbt.bin */; };
 		10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* QixiMemoryTelemetry.swift */; };
 		100000000000000000000168 /* QixiSwitchMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000268 /* QixiSwitchMonitor.swift */; };
 		100000000000000000000169 /* CandidateQualityLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000269 /* CandidateQualityLayout.swift */; };
@@ -139,9 +136,6 @@
 		10000000000000000000022C /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		10000000000000000000022D /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
 		10000000000000000000022E /* MetalPerformanceShadersGraph.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShadersGraph.framework; path = System/Library/Frameworks/MetalPerformanceShadersGraph.framework; sourceTree = SDKROOT; };
-		10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; name = "g170-b6c96-s175395328-d26788732.bin.gz"; path = "../../KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz"; sourceTree = "<group>"; };
-		100000000000000000000230 /* b18nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b18nbt.bin; path = "../../b18nbt.bin"; sourceTree = "<group>"; };
-		100000000000000000000231 /* b28nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b28nbt.bin; path = "../../b28nbt.bin"; sourceTree = "<group>"; };
 		100000000000000000000232 /* QixiMemoryTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryTelemetry.swift; sourceTree = "<group>"; };
 		100000000000000000000268 /* QixiSwitchMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSwitchMonitor.swift; sourceTree = "<group>"; };
 		100000000000000000000269 /* CandidateQualityLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateQualityLayout.swift; sourceTree = "<group>"; };
@@ -282,9 +276,6 @@
 		100000000000000000000406 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				10000000000000000000022F /* g170-b6c96-s175395328-d26788732.bin.gz */,
-				100000000000000000000230 /* b18nbt.bin */,
-				100000000000000000000231 /* b28nbt.bin */,
 			);
 			name = Models;
 			sourceTree = "<group>";
@@ -429,9 +420,6 @@
 				10000000000000000000010C /* Resources/Images/whiteStone.png in Resources */,
 				10000000000000000000010D /* Resources/Images/hermesGatewayPulse.png in Resources */,
 				100000000000000000000115 /* PrivacyInfo.xcprivacy in Resources */,
-				100000000000000000000128 /* g170-b6c96-s175395328-d26788732.bin.gz in Resources */,
-				100000000000000000000129 /* b18nbt.bin in Resources */,
-				10000000000000000000012A /* b28nbt.bin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

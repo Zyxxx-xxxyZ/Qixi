@@ -10,6 +10,7 @@ swiftc \
   "$NATIVE_DIR/Qixi/L10n.swift" \
   "$NATIVE_DIR/Qixi/QixiModels.swift" \
   "$NATIVE_DIR/Qixi/CandidatePalette.swift" \
+  "$NATIVE_DIR/Qixi/CandidateQualityLayout.swift" \
   "$NATIVE_DIR/Qixi/QixiAnalyzeDisplay.swift" \
   "$SCRIPT_DIR/variation_incremental_smoke_shims.swift" \
   "$NATIVE_DIR/Qixi/QixiAnalysisService.swift" \

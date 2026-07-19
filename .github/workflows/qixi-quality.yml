@@ -59,6 +59,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -74,6 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -100,6 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -126,6 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -157,6 +162,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -192,6 +198,8 @@ jobs:
       QIXI_DEVICE_ALLOW_PROVISIONING_UPDATES: ${{ secrets.QIXI_DEVICE_ALLOW_PROVISIONING_UPDATES }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -211,6 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:

@@ -251,7 +251,8 @@ for token in (
   "nativeKataGoPositionKeyMaterial(const NativeKataGoAnalysisRequest& request)",
   "readableNonEmptyDirectory",
   "config.coreMLPackagePaths",
-  "analyzeRequestJSON is disabled",
+  "NativeKataGoCore::analyzeRequestJSON",
+  "noEngineAnalysisResult",
   "exportCoreStateToFile",
   "importCoreStateFromFile",
   "engine->unloadModel()",
@@ -260,9 +261,11 @@ for token in (
   "if(!unloadResult.ok())",
   "loadedEngineID = \"none\"",
   "engine->loadModel",
+  # Product load policy: build next model first (no unconditional unload-before-load).
+  "do NOT unload first",
 ):
   if token not in core_impl:
-    fail(f"native core missing required unload-before-load token: {token}")
+    fail(f"native core missing required product lifecycle token: {token}")
 
 for forbidden in (
   "BackendClient",

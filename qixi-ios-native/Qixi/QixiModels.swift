@@ -549,10 +549,20 @@ enum QixiUnsavedChoice {
   case cancel
 }
 
+/// One list row for Open archives (`.qixi.png` packages). Defined here so smoke
+/// compiles of `QixiModels` do not require the full iCloud sync surface.
+struct QixiArchiveListItem: Identifiable, Equatable {
+  var id: String { url.standardizedFileURL.path }
+  var url: URL
+  var displayName: String
+  var sortDate: Date
+  var isICloud: Bool
+}
+
 enum QixiUnsavedKind: Equatable {
   case newGame
   case openSheet
-  case openArchive(QixiSyncStore.ArchiveListItem)
+  case openArchive(QixiArchiveListItem)
   case appBackground
 }
 

@@ -178,11 +178,13 @@ struct PersistenceSyncSmoke {
       "package writes QuickLook/Thumbnail.png so Files can show a per-document icon"
     )
     let visiblePackageURL = try QixiSyncStore.replaceVisibleMCTSStatePackage(with: visiblePackageSource)
+    // Destination is sealed to a PNG-leading `.qixi.png` document so Files shows a board icon.
+    // Nested QuickLook paths only exist for directory packages before seal.
+    var isDirectory: ObjCBool = false
     expect(
-      FileManager.default.fileExists(
-        atPath: QixiMCTSStatePackageStore.quickLookThumbnailURL(in: visiblePackageURL).path
-      ),
-      "visible MCTS package copy preserves QuickLook thumbnail"
+      FileManager.default.fileExists(atPath: visiblePackageURL.path, isDirectory: &isDirectory) &&
+        !isDirectory.boolValue,
+      "visible MCTS package is sealed to a single importable image document"
     )
     expect(
       visiblePackageURL.lastPathComponent == QixiSyncStore.visibleMCTSStatePackageFilename,
@@ -601,8 +603,8 @@ struct PersistenceSyncSmoke {
       rootNoise: 0.0
     )
     let leadingZeroBitsCacheKey = canonicalSemanticCacheKey.replacingOccurrences(
-      of: "|rootNoiseBits:0|history:",
-      with: "|rootNoiseBits:00|history:"
+      of: "|rootNoiseBits:0|pdaBits:",
+      with: "|rootNoiseBits:00|pdaBits:"
     )
     expect(leadingZeroBitsCacheKey != canonicalSemanticCacheKey, "semantic cache key helper changed root-noise bits")
     let malformedLeadingZeroBitsSnapshot = snapshotWithReplacedCacheKey(original, cacheKey: leadingZeroBitsCacheKey)
@@ -613,8 +615,8 @@ struct PersistenceSyncSmoke {
     expect(malformedLeadingZeroBitsDecoded == nil, "snapshot decode rejects leading-zero semantic cache bit fields")
 
     let overlongBitsCacheKey = canonicalSemanticCacheKey.replacingOccurrences(
-      of: "|rootNoiseBits:0|history:",
-      with: "|rootNoiseBits:10000000000000000|history:"
+      of: "|rootNoiseBits:0|pdaBits:",
+      with: "|rootNoiseBits:10000000000000000|pdaBits:"
     )
     expect(overlongBitsCacheKey != canonicalSemanticCacheKey, "semantic cache key helper changed root-noise bits to an overlong field")
     let malformedOverlongBitsSnapshot = snapshotWithReplacedCacheKey(original, cacheKey: overlongBitsCacheKey)
