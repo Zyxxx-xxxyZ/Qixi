@@ -44,6 +44,10 @@ protocol NativeKataGoBridgeProtocol: AnyObject {
   func restoreTombstone(from url: URL) throws
   func submitCoreRequestJSON(_ requestJSON: String) throws -> String
   func latestCoreSnapshotJSON() throws -> String
+  func publishedAnalyzeRevision() -> UInt64
+  func loadAnalyzeDisplayPayloadData() throws -> Data?
+  func postNavPlayMove(_ move: UInt32, uiIntentId: UInt64) -> Bool
+  func postNavSwitchRoot(_ nodeId: UInt32, uiIntentId: UInt64) -> Bool
   func coreIoProgressJSON() throws -> String
   func legalMoveMaskJSON() throws -> String
   func exportCoreState(to url: URL) throws
@@ -66,6 +70,10 @@ extension QixiNativeKataGoBridge: NativeKataGoBridgeProtocol {
   func importCoreState(from url: URL) throws {
     try importCoreState(fromFile: url.path)
   }
+
+  func loadAnalyzeDisplayPayloadData() throws -> Data? {
+    analyzeDisplayPayloadData() as Data?
+  }
 }
 
 actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneService, QixiCoreBackendService {
@@ -74,10 +82,15 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
   private static let libraryNotLinkedErrorCode = 1
   private static let invalidRequestErrorCode = 2
 
-  private let bridge: NativeKataGoBridgeProtocol
-  private let modelStore: QixiNativeModelStore
-  private let memoryPolicy: QixiNativeDeviceMemoryPolicy
-  private var currentEngine: AnalysisEngine = .none
+  /// Lock-free HUD probes may call into the ObjC bridge off the actor; bridge methods used
+  /// there are pure C++ atomics/memcpy under the hood.
+  nonisolated(unsafe) private let bridge: NativeKataGoBridgeProtocol
+  nonisolated(unsafe) private let modelStore: QixiNativeModelStore
+  nonisolated(unsafe) private let memoryPolicy: QixiNativeDeviceMemoryPolicy
+  /// currentEngine is read/written from setEngine which deliberately runs OFF the actor
+  /// (see setEngine). Protect with a lock — never couple it to actor isolation.
+  nonisolated(unsafe) private let engineStateLock = NSLock()
+  nonisolated(unsafe) private var currentEngineValue: AnalysisEngine = .none
   private let coreJSONEncoder = JSONEncoder()
   private let coreJSONDecoder = JSONDecoder()
 
@@ -91,9 +104,43 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
     self.memoryPolicy = memoryPolicy
   }
 
+  nonisolated private func loadCurrentEngine() -> AnalysisEngine {
+    engineStateLock.lock()
+    defer { engineStateLock.unlock() }
+    return currentEngineValue
+  }
+
+  nonisolated private func storeCurrentEngine(_ engine: AnalysisEngine) {
+    engineStateLock.lock()
+    currentEngineValue = engine
+    engineStateLock.unlock()
+  }
+
+  /// Model switch must NEVER share the analysis actor with structure snapshots.
+  ///
+  /// Observed bug (b28→b18, few seconds of analysis):
+  ///   wall≈35899ms, setEngine≈35877ms, core begin only at +35s, engineSelector≈0.3s.
+  /// Structure `latestCoreSnapshot` ran on this actor and blocked on core `stateMutex`
+  /// while free search held it. `setEngine` sat behind that actor hop, so `selectEngine`
+  /// was never enqueued and free search kept running — until the snapshot finally got
+  /// the lock ~35s later. Run setEngine off the actor so it can submit selectEngine now.
   func setEngine(_ engine: AnalysisEngine) async throws -> BackendStatusResponse {
+    try await withCheckedThrowingContinuation { continuation in
+      // Global queue — not the analysis actor. loadEngine is a blocking C++ call.
+      DispatchQueue.global(qos: .userInitiated).async { [self] in
+        do {
+          let response = try self.performSetEngine(engine)
+          continuation.resume(returning: response)
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  nonisolated private func performSetEngine(_ engine: AnalysisEngine) throws -> BackendStatusResponse {
     do {
-      if currentEngine == engine {
+      if loadCurrentEngine() == engine {
         return BackendStatusResponse(
           engine: engine.rawValue,
           engineId: engine.rawValue,
@@ -122,17 +169,22 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
           maximumMemoryMB: Int32(spec.maximumMemoryMB)
         )
       }
+      let t0 = ContinuousClock.now
       try bridge.loadEngine(engine.rawValue)
-      currentEngine = engine
+      let loadMs = Int((ContinuousClock.now - t0) / .milliseconds(1))
+      print("[qixi-switch] Swift setEngine bridge.loadEngine wall_ms=\(loadMs) engine=\(engine.rawValue)")
+      storeCurrentEngine(engine)
       return BackendStatusResponse(
         engine: engine.rawValue,
         engineId: engine.rawValue,
-        state: engine == .none ? "no engine loaded" : "native engine loaded",
+        state: engine == .none
+          ? "no engine loaded"
+          : "native engine loaded wall_ms=\(loadMs)",
         running: engine != .none,
         paused: false
       )
     } catch {
-      throw mapNativeBridgeError(error)
+      throw Self.mapNativeBridgeErrorStatic(error)
     }
   }
 
@@ -144,19 +196,67 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
     }
   }
 
+  /// Structure poll: must not sit on the actor for long. Core now try_locks stateMutex;
+  /// a "busy" frame is dropped by the UI apply path (epoch 0).
   func latestCoreSnapshot() async throws -> QixiCoreBackendResult {
     do {
-      let responseJSON = try bridge.latestCoreSnapshotJSON()
+      // Run off the actor so a slow decode never blocks setEngine (belt-and-suspenders
+      // with the detached setEngine path above).
+      let bridge = self.bridge
+      let responseJSON = try await Task.detached(priority: .utility) {
+        try bridge.latestCoreSnapshotJSON()
+      }.value
       return try decodeCoreBackendResult(from: responseJSON)
     } catch {
       throw mapNativeBridgeError(error)
     }
   }
 
+  func publishedAnalyzeRevision() async -> UInt64 {
+    publishedAnalyzeRevisionSync()
+  }
+
+  func tryLoadAnalyzeDisplay() async -> QixiAnalyzeDisplayPayload? {
+    tryLoadAnalyzeDisplaySync()
+  }
+
+  /// Lock-free; safe to call without awaiting the analysis actor (HUD 120 Hz path).
+  nonisolated func publishedAnalyzeRevisionSync() -> UInt64 {
+    bridge.publishedAnalyzeRevision()
+  }
+
+  nonisolated func tryLoadAnalyzeDisplaySync() -> QixiAnalyzeDisplayPayload? {
+    do {
+      guard let data = try bridge.loadAnalyzeDisplayPayloadData() else { return nil }
+      return QixiAnalyzeDisplayPayload.decode(from: data)
+    } catch {
+      return nil
+    }
+  }
+
+  func postNavPlay(move: UInt32, uiIntentId: UInt64) async -> Bool {
+    postNavPlaySync(move: move, uiIntentId: uiIntentId)
+  }
+
+  func postNavSwitchRoot(nodeId: UInt32, uiIntentId: UInt64) async -> Bool {
+    postNavSwitchRootSync(nodeId: nodeId, uiIntentId: uiIntentId)
+  }
+
+  /// Lock-free post; safe off the actor (play hot path).
+  nonisolated func postNavPlaySync(move: UInt32, uiIntentId: UInt64) -> Bool {
+    bridge.postNavPlayMove(move, uiIntentId: uiIntentId)
+  }
+
+  nonisolated func postNavSwitchRootSync(nodeId: UInt32, uiIntentId: UInt64) -> Bool {
+    bridge.postNavSwitchRoot(nodeId, uiIntentId: uiIntentId)
+  }
+
   struct CoreIoProgress: Decodable, Equatable {
     var active: Bool
     var phase: String
     var fraction: Double
+    var unitsDone: UInt64?
+    var unitsTotal: UInt64?
     var bytesDone: UInt64
     var bytesTotal: UInt64
     var message: String
@@ -226,7 +326,7 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
   }
 
   private func clearLoadedEngineBeforeRealEngineSwitch() throws {
-    currentEngine = .none
+    storeCurrentEngine(.none)
     try bridge.loadEngine(AnalysisEngine.none.rawValue)
   }
 
@@ -260,15 +360,16 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
           "Core MCTS snapshot is empty; wait for background playouts."
         )
       }
+      let engine = loadCurrentEngine()
       let response = Self.analysisResponse(
         from: snapshot,
-        engine: currentEngine,
+        engine: engine,
         moves: moves,
         setupStones: setupStones,
         komi: komi,
         rootNoise: rootNoise
       )
-      try QixiAnalysisResponseValidator.validate(response, expectedEngine: currentEngine)
+      try QixiAnalysisResponseValidator.validate(response, expectedEngine: engine)
       return response
     } catch let error as QixiNativeKataGoServiceError {
       throw error
@@ -336,7 +437,7 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
     do {
       if engine == .none {
         try bridge.loadEngine(AnalysisEngine.none.rawValue)
-        currentEngine = .none
+        storeCurrentEngine(.none)
         try bridge.restoreTombstone(from: url)
       } else {
         _ = try await setEngine(engine)
@@ -353,6 +454,10 @@ actor NativeKataGoAnalysisService: QixiAnalysisService, QixiEngineTombstoneServi
   }
 
   private func mapNativeBridgeError(_ error: Error) -> Error {
+    Self.mapNativeBridgeErrorStatic(error)
+  }
+
+  nonisolated private static func mapNativeBridgeErrorStatic(_ error: Error) -> Error {
     let nsError = error as NSError
     if nsError.domain == Self.nativeErrorDomain && nsError.code == Self.libraryNotLinkedErrorCode {
       return QixiNativeKataGoServiceError.libraryNotLinked

@@ -235,6 +235,53 @@ public:
     return testPolicyOnly_;
   }
 
+  bool memoryUnloadAndReload(std::string* error) override {
+    if(!testPolicyOnly_ || !policyOnlyStore_) {
+      // Stock Search path has no Qixi store blob; no-op success under non-test mode.
+      if(!testPolicyOnly_)
+        return true;
+      if(error) *error = "policy-only store not built for unload/reload";
+      return false;
+    }
+    const bool wantPolicyOnly = true;
+    const core::NodeId expectRoot = policyOnlyStore_->currentRoot();
+    const uint64_t visitsBefore = policyOnlyStore_->snapshot().rootVisits;
+    const std::vector<uint8_t> bytes = policyOnlyStore_->serialize();
+    if(bytes.empty()) {
+      if(error) *error = "official serialize produced empty blob";
+      return false;
+    }
+    policyOnlyStore_.reset();
+    std::string importError;
+    auto restored = core::MCTSStore::deserialize(bytes, &importError);
+    if(!restored) {
+      if(error) *error = "official deserialize failed: " + importError;
+      return false;
+    }
+    policyOnlyStore_ = std::move(*restored);
+    policyOnlyStore_->setEvaluator(&coreEval_);
+    if(wantPolicyOnly) {
+#if defined(QIXI_ALLOW_TEST_SELECTION_MODES) && QIXI_ALLOW_TEST_SELECTION_MODES
+      if(!policyOnlyStore_->setTreeSelectionMode(
+           core::TreeSelectionMode::testNnPolicyOnly,
+           core::MCTSStore::kTestSelectionModeAllowToken,
+           error
+         )) {
+        return false;
+      }
+#endif
+    }
+    if(expectRoot != policyOnlyStore_->currentRoot()) {
+      if(!policyOnlyStore_->switchRoot(expectRoot, error))
+        return false;
+    }
+    if(policyOnlyStore_->snapshot().rootVisits != visitsBefore) {
+      if(error) *error = "official root visits changed across unload/reload";
+      return false;
+    }
+    return true;
+  }
+
 private:
   bool rebuildPolicyOnlyStoreToPly(size_t ply, std::string* error) {
     if(ply > line_.moves.size()) {

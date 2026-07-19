@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cerrno>
 #include <fcntl.h>
@@ -22,7 +23,7 @@ float clamp01(float value) {
   return value;
 }
 
-uint64_t mixDeterministic(uint64_t value) {
+uint64_t mixDeterministic(uint64_t value) {              //value -> hashed_value
   value += 0x9e3779b97f4a7c15ULL;
   value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
   value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
@@ -34,14 +35,14 @@ double deterministicUnit(uint64_t value) {
     static_cast<double>(1ULL << 53);
 }
 
-bool terminalByPasses(const BoardState& board) {
-  const size_t count = board.moves.size();
-  return count >= 2 &&
-    board.moves[count - 1].move == kMovePass &&
-    board.moves[count - 2].move == kMovePass;
-}
+//bool terminalByPasses(const BoardState& board) {    //double pass -> terminate the game
+//  const size_t count = board.moves.size();
+//  return count >= 2 &&
+//    board.moves[count - 1].move == kMovePass &&
+//    board.moves[count - 2].move == kMovePass;
+//}
 
-bool validLeafPayload(const LeafPayload& leaf) {
+bool validLeafPayload(const LeafPayload& leaf) {    // to check whether a node is valid
   if(!std::isfinite(leaf.weight) || leaf.weight <= 0.0f ||
      !std::isfinite(leaf.winLossWhite) || leaf.winLossWhite < -1.0f || leaf.winLossWhite > 1.0f ||
      !std::isfinite(leaf.noResult) || leaf.noResult < 0.0f || leaf.noResult > 1.0f ||
@@ -320,7 +321,9 @@ uint64_t checksum64Progress(
 }
 
 // Raised from 512 MiB: policy-only oracle stress can grow multi-hundred-MiB trees.
-constexpr uint64_t kMaxSerializedBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+// Must match product rehydrate cap in request_pool.cpp (kMaxCoreStateBytes).
+// Writing a larger blob would make OOM unload unrestorable.
+constexpr uint64_t kMaxSerializedBytes = 384ULL * 1024ULL * 1024ULL;
 constexpr uint64_t kMaxSerializedNodes = 5000000ULL;
 constexpr uint64_t kMaxSerializedActions = 20000000ULL;
 constexpr uint64_t kMaxArenaElements = 120000000ULL;
@@ -363,12 +366,12 @@ bool UniformEvaluator::evaluate(
   output.utilityWhite = output.winLossWhite;
   output.noResult = 0.0f;
   for(int i = 0; i < kOwnershipDim; ++i) {
-    if(board.cells[i] == Color::white)
-      output.ownership[i] = 1.0f;
-    else if(board.cells[i] == Color::black)
-      output.ownership[i] = -1.0f;
+    if(board.cells[static_cast<size_t>(i)] == Color::white)
+      output.ownership[static_cast<size_t>(i)] = 1.0f;
+    else if(board.cells[static_cast<size_t>(i)] == Color::black)
+      output.ownership[static_cast<size_t>(i)] = -1.0f;
     else
-      output.ownership[i] = 0.0f;
+      output.ownership[static_cast<size_t>(i)] = 0.0f;
   }
   const auto legal = BoardLogic::legalMoveMask(board, rules);
   int count = 0;
@@ -378,7 +381,7 @@ bool UniformEvaluator::evaluate(
   }
   const float p = count > 0 ? 1.0f / static_cast<float>(count) : 0.0f;
   for(int i = 0; i < kMoveCount; ++i)
-    output.policy[i] = legal[i] ? p : -1.0f;
+    output.policy[static_cast<size_t>(i)] = legal[static_cast<size_t>(i)] ? p : -1.0f;
   output.weight = 1.0f;
   return true;
 }
@@ -394,8 +397,15 @@ MCTSStore MCTSStore::create(
   store.storeRules = rules;
   store.key = key;
   store.params = params;
+  // Force AnalysisKey fields that validate() cross-checks against rules/params.
+  // Inconsistent keys used to serialize fine and then fail closed on every load.
+  store.key.rulesHash = hashRules(store.storeRules);
+  store.key.komiKey = komiToKey(store.storeRules.komi);
+  store.key.wideRootNoiseKey = wideRootNoiseToKey(store.params.rootNoise);
   store.root = store.createInitialNode();
-  store.rootBoardState = initialBoard;
+  store.rootBoardPtr = store.boardCacheFor(store.root);
+  if(!store.rootBoardPtr)
+    store.rootBoardPtr = std::make_shared<const BoardState>(initialBoard);
   store.visible.resize(store.nodes.size(), 0);
   store.visible[store.root] = 1;
   return store;
@@ -406,7 +416,8 @@ NodeId MCTSStore::currentRoot() const {
 }
 
 const BoardState& MCTSStore::rootBoard() const {
-  return rootBoardState;
+  static const BoardState kEmpty = BoardLogic::emptyBoard();
+  return rootBoardPtr ? *rootBoardPtr : kEmpty;
 }
 
 const Rules& MCTSStore::rules() const {
@@ -423,6 +434,10 @@ const SearchParams& MCTSStore::searchParams() const {
 
 void MCTSStore::assignImportedGameId(GameId gameId) {
   key.gameId = gameId;
+}
+
+void MCTSStore::rekeyModelId(ModelId modelId) {
+  key.modelId = modelId;
 }
 
 void MCTSStore::setEvaluator(Evaluator* value) {
@@ -514,6 +529,7 @@ NodeId MCTSStore::createInitialNode() {
   nodes.back().ancestorCount = 1;
   ancestorArena.push_back(node.id);
   visibleLineageIndex.emplace(node.lineageHash, node.id);
+  storeBoardCache(0, initialBoardState);
   return node.id;
 }
 
@@ -540,12 +556,41 @@ NodeId MCTSStore::createChildLink(NodeId parent, Move move, const BoardState& ch
   nodes.push_back(node);
   visible.push_back(0);
   childIndex.emplace(keyValue, node.id);
+  storeBoardCache(node.id, childBoard);
   return node.id;
+}
+
+void MCTSStore::storeBoardCache(NodeId node, BoardState board) {
+  if(node >= nodes.size())
+    return;
+  if(boardCacheByNode.size() < nodes.size())
+    boardCacheByNode.resize(nodes.size());
+  boardCacheByNode[node] = std::make_shared<const BoardState>(std::move(board));
+}
+
+std::shared_ptr<const BoardState> MCTSStore::boardCacheFor(NodeId node) const {
+  if(node >= boardCacheByNode.size())
+    return nullptr;
+  return boardCacheByNode[node];
+}
+
+std::shared_ptr<const BoardState> MCTSStore::ensureBoardCache(NodeId node) {
+  if(node >= nodes.size())
+    return nullptr;
+  if(auto existing = boardCacheFor(node))
+    return existing;
+  auto materialized = materializePosition(node);
+  if(!materialized)
+    return nullptr;
+  storeBoardCache(node, std::move(*materialized));
+  return boardCacheFor(node);
 }
 
 std::optional<BoardState> MCTSStore::materializePosition(NodeId node) const {
   if(node >= nodes.size())
     return std::nullopt;
+  if(auto cached = boardCacheFor(node))
+    return *cached;
   std::vector<Move> moves;
   NodeId current = node;
   while(current != kInvalidNode) {
@@ -571,15 +616,19 @@ bool MCTSStore::switchRoot(NodeId node, std::string* error) {
       *error = "target node is out of range";
     return false;
   }
-  auto materialized = materializePosition(node);
-  if(!materialized) {
+  // O(1) path: shared_ptr assign (cache miss fills once, amortized).
+  auto cached = ensureBoardCache(node);
+  if(!cached) {
     if(error)
       *error = "could not materialize target node";
     return false;
   }
   root = node;
-  rootBoardState = std::move(*materialized);
+  rootBoardPtr = std::move(cached);
   rootSessionSeq += 1;
+  // Checkpoint/validate require the current root to be visible. Search leaves many
+  // nodes invisible; without this, autosave/OOM unload fail after a root switch.
+  markVisible(node, true);
   return true;
 }
 
@@ -623,25 +672,34 @@ std::optional<NodeId> MCTSStore::findVisibleNodeByLineage(uint64_t lineageHash) 
 }
 
 std::array<bool, kMoveCount> MCTSStore::legalMoveMask() const {
-  return BoardLogic::legalMoveMask(rootBoardState, storeRules);
+  return BoardLogic::legalMoveMask(rootBoard(), storeRules);
 }
 
 PlayMoveCommit MCTSStore::playMoveFromRoot(Move move) {
   PlayMoveCommit commit;
-  const BoardState before = rootBoardState;
-  LegalResult result = BoardLogic::playMove(rootBoardState, storeRules, move);
+  const BoardState& beforeRef = rootBoard();
+  LegalResult result = BoardLogic::playMove(beforeRef, storeRules, move);
   if(!result.legal) {
     commit.error = result.reason.empty() ? "illegal move" : result.reason;
     return commit;
   }
+  const Color pla = beforeRef.nextPla;
   const NodeId child = createChildLink(root, move, result.next);
+  // Link parent action → child so FIFO redo / PV walk can follow played moves
+  // even when the parent has not been searched yet.
+  (void)getOrCreateAction(root, move);
+  // createChildLink already stores board cache for child.
   markVisible(child, true);
   root = child;
-  rootBoardState = std::move(result.next);
+  rootBoardPtr = boardCacheFor(child);
+  if(!rootBoardPtr) {
+    storeBoardCache(child, result.next);
+    rootBoardPtr = boardCacheFor(child);
+  }
   rootSessionSeq += 1;
   commit.ok = true;
   commit.node = child;
-  commit.patch = BoardLogic::patchBetween(before, rootBoardState, move, before.nextPla);
+  commit.patch = BoardLogic::patchBetween(beforeRef, *rootBoardPtr, move, pla);
   return commit;
 }
 
@@ -808,11 +866,11 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
 
   while(true) {
     Node& node = nodes[current];
-    if(terminalByPasses(state.board)) {
-      node.state = NodeState::terminal;
-      leaf = current;
-      return true;
-    }
+//    if(terminalByPasses(state.board)) {
+//      node.state = NodeState::terminal;
+//      leaf = current;
+//      return true;
+//    }
     // First-visit barrier for the *current root*:
     // even if the node is already expanded (NN stored under another root), a
     // root that has not yet visited it must stop here and perform exactly one
@@ -841,51 +899,51 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
   }
 }
 
-ActionId MCTSStore::selectActionByNnPolicyOnly(NodeId parentId) {
-  // TEST-ONLY path: sample a legal child proportional to the stored NN prior.
-  // Visit counts, Q-values, FPU, and root noise are intentionally ignored so
-  // prior MCTS traffic through a node cannot bias successor choice.
-  const Node& parent = nodes[parentId];
-  if(parent.policyOffset == kInvalidNode ||
-     static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())
-    return kInvalidAction;
-
-  float priorSum = 0.0f;
-  for(Move move = 0; move < kMoveCount; ++move) {
-    const float prior = policyArena[parent.policyOffset + move];
-    if(prior > 0.0f)
-      priorSum += prior;
-  }
-  if(priorSum <= 0.0f)
-    return kInvalidAction;
-
-  // Deterministic unit draw from store seed, playout index, and parent id so
-  // two engines with the same NN priors and seed follow the same trajectory
-  // regardless of visit statistics.
-  const uint64_t keyValue = params.seed ^
-    (playoutSeq * 0x9e3779b97f4a7c15ULL) ^
-    (static_cast<uint64_t>(parentId) * 0xbf58476d1ce4e5b9ULL) ^
-    0x504f4c594f4e4c59ULL; // "POLYONLY"
-  const double u = deterministicUnit(keyValue) * static_cast<double>(priorSum);
-  double cumulative = 0.0;
-  Move chosen = kMovePass;
-  bool found = false;
-  for(Move move = 0; move < kMoveCount; ++move) {
-    const float prior = policyArena[parent.policyOffset + move];
-    if(prior <= 0.0f)
-      continue;
-    cumulative += static_cast<double>(prior);
-    if(!found || u <= cumulative) {
-      chosen = move;
-      found = true;
-      if(u <= cumulative)
-        break;
-    }
-  }
-  if(!found)
-    return kInvalidAction;
-  return getOrCreateAction(parentId, chosen);
-}
+//ActionId MCTSStore::selectActionByNnPolicyOnly(NodeId parentId) {
+//  // TEST-ONLY path: sample a legal child proportional to the stored NN prior.
+//  // Visit counts, Q-values, FPU, and root noise are intentionally ignored so
+//  // prior MCTS traffic through a node cannot bias successor choice.
+//  const Node& parent = nodes[parentId];
+//  if(parent.policyOffset == kInvalidNode ||
+//     static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())
+//    return kInvalidAction;
+//
+//  float priorSum = 0.0f;
+//  for(Move move = 0; move < kMoveCount; ++move) {
+//    const float prior = policyArena[parent.policyOffset + move];
+//    if(prior > 0.0f)
+//      priorSum += prior;
+//  }
+//  if(priorSum <= 0.0f)
+//    return kInvalidAction;
+//
+//  // Deterministic unit draw from store seed, playout index, and parent id so
+//  // two engines with the same NN priors and seed follow the same trajectory
+//  // regardless of visit statistics.
+//  const uint64_t keyValue = params.seed ^
+//    (playoutSeq * 0x9e3779b97f4a7c15ULL) ^
+//    (static_cast<uint64_t>(parentId) * 0xbf58476d1ce4e5b9ULL) ^
+//    0x504f4c594f4e4c59ULL; // "POLYONLY"
+//  const double u = deterministicUnit(keyValue) * static_cast<double>(priorSum);
+//  double cumulative = 0.0;
+//  Move chosen = kMovePass;
+//  bool found = false;
+//  for(Move move = 0; move < kMoveCount; ++move) {
+//    const float prior = policyArena[parent.policyOffset + move];
+//    if(prior <= 0.0f)
+//      continue;
+//    cumulative += static_cast<double>(prior);
+//    if(!found || u <= cumulative) {
+//      chosen = move;
+//      found = true;
+//      if(u <= cumulative)
+//        break;
+//    }
+//  }
+//  if(!found)
+//    return kInvalidAction;
+//  return getOrCreateAction(parentId, chosen);
+//}
 
 ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
   if(treeSelectionMode_ == TreeSelectionMode::testNnPolicyOnly) {
@@ -991,25 +1049,25 @@ bool MCTSStore::evaluateLeaf(
   bool isRoot,
   LeafPayload& leaf
 ) {
-  if(terminalByPasses(state.board)) {
-    leaf = LeafPayload{};
-    const float score = whiteScoreLead(state.board, storeRules);
-    leaf.scoreMeanWhite = score;
-    leaf.scoreMeanSqWhite = score * score;
-    leaf.leadWhite = score;
-    leaf.winLossWhite = score > 0.0f ? 1.0f : (score < 0.0f ? -1.0f : 0.0f);
-    leaf.utilityWhite = leaf.winLossWhite;
-    leaf.weight = 1.0f;
-    for(int i = 0; i < kOwnershipDim; ++i) {
-      if(state.board.cells[i] == Color::white)
-        leaf.ownership[i] = 1.0f;
-      else if(state.board.cells[i] == Color::black)
-        leaf.ownership[i] = -1.0f;
-      else
-        leaf.ownership[i] = 0.0f;
-    }
-    return true;
-  }
+//  if(terminalByPasses(state.board)) {
+//    leaf = LeafPayload{};
+//    const float score = whiteScoreLead(state.board, storeRules);
+//    leaf.scoreMeanWhite = score;
+//    leaf.scoreMeanSqWhite = score * score;
+//    leaf.leadWhite = score;
+//    leaf.winLossWhite = score > 0.0f ? 1.0f : (score < 0.0f ? -1.0f : 0.0f);
+//    leaf.utilityWhite = leaf.winLossWhite;
+//    leaf.weight = 1.0f;
+//    for(int i = 0; i < kOwnershipDim; ++i) {
+//      if(state.board.cells[i] == Color::white)
+//        leaf.ownership[i] = 1.0f;
+//      else if(state.board.cells[i] == Color::black)
+//        leaf.ownership[i] = -1.0f;
+//      else
+//        leaf.ownership[i] = 0.0f;
+//    }
+//    return true;
+//  }
   // Prefer the once-stored NN output so a later root does not re-query the net
   // for a node that was already expanded under a different root.
   if(loadStoredNNOutput(leafNode, leaf))
@@ -1024,7 +1082,7 @@ bool MCTSStore::runPlayout() {
     return false;
   if(nodes[root].state == NodeState::terminal && rootHasVisitedNode(root) && nodes[root].visits > 0)
     return false;
-  ThreadState state{rootBoardState};
+  ThreadState state{rootBoard()};
   Path path;
   NodeId leafNode = kInvalidNode;
   if(!selectPathToLeaf(state, path, leafNode))
@@ -1204,6 +1262,71 @@ float MCTSStore::displayScoreMean(const ScalarStats& stats, Color pla) const {
   return stats.scoreMeanWhite;
 }
 
+bool MCTSStore::qualityDeltaPercentForParentAction(
+  const Node& parent,
+  Move playedMove,
+  float& outQualityDeltaPercent
+) const {
+  // Keep in sync with CandidatePalette.extremeLowWinrateAbsolute / scoreLossPaletteScale.
+  constexpr float kExtremeLowWinrate = 0.05f;
+  constexpr float kScoreLossPaletteScale = 2.5f;
+
+  bool foundPlayed = false;
+  bool foundAny = false;
+  float playedWR = 0.0f;
+  float playedScore = 0.0f;
+  float bestWR = 0.0f;
+  float bestScore = 0.0f;
+
+  ActionId parentAction = parent.firstAction;
+  uint32_t traversed = 0;
+  while(parentAction != kInvalidAction && traversed < parent.actionCount) {
+    if(parentAction >= actions.size())
+      break;
+    const Action& action = actions[parentAction];
+    if(action.visits > 0) {
+      // Metrics from the **parent side-to-move** (the player choosing among actions).
+      const float wr = displayWinrate(action.stats, parent.nextPla);
+      const float sc = displayScoreMean(action.stats, parent.nextPla);
+      if(!foundAny) {
+        bestWR = wr;
+        bestScore = sc;
+        foundAny = true;
+      } else {
+        if(wr > bestWR)
+          bestWR = wr;
+        if(sc > bestScore)
+          bestScore = sc;
+      }
+      if(action.move == playedMove) {
+        playedWR = wr;
+        playedScore = sc;
+        foundPlayed = true;
+      }
+    }
+    parentAction = action.nextAction;
+    traversed += 1;
+  }
+  if(!foundPlayed || !foundAny)
+    return false;
+
+  // Side-to-move winrate of the parent position (not Black's chart winrate).
+  // Use min(parentSTM, bestPeer) so one optimistic peer just above 5% cannot
+  // keep winrate-loss dyeing while the side to move is still crushed.
+  const float parentSTM =
+    parent.visits > 0 ? displayWinrate(parent.stats, parent.nextPla) : bestWR;
+  const float effectiveSTM = std::min(bestWR, parentSTM);
+  const bool extremeLow = effectiveSTM <= kExtremeLowWinrate;
+  if(extremeLow) {
+    // Score-loss mode: points behind best STM score, scaled into palette k-space.
+    const float scoreLoss = std::max(0.0f, bestScore - playedScore);
+    outQualityDeltaPercent = -scoreLoss * kScoreLossPaletteScale;
+  } else {
+    outQualityDeltaPercent = (playedWR - bestWR) * 100.0f;
+  }
+  return true;
+}
+
 RootSnapshot MCTSStore::snapshot() const {
   RootSnapshot snap;
   if(root >= nodes.size())
@@ -1265,33 +1388,10 @@ RootSnapshot MCTSStore::snapshot() const {
     item.analyzed = node.visits > 0;
     item.winrate = item.analyzed ? displayWinrate(node.stats, node.nextPla) : 0.0f;
     item.scoreMean = item.analyzed ? displayScoreMean(node.stats, node.nextPla) : 0.0f;
-    if(node.parent != kInvalidNode) {
-      const Node& parentNode = nodes[node.parent];
-      ActionId parentAction = parentNode.firstAction;
-      uint32_t parentActionsTraversed = 0;
-      bool foundPlayedMove = false;
-      bool foundAnalyzedMove = false;
-      float playedWinrate = 0.0f;
-      float bestWinrate = 0.0f;
-      while(parentAction != kInvalidAction && parentActionsTraversed < parentNode.actionCount) {
-        if(parentAction >= actions.size())
-          break;
-        const Action& action = actions[parentAction];
-        if(action.visits > 0) {
-          const float actionWinrate = displayWinrate(action.stats, parentNode.nextPla);
-          if(!foundAnalyzedMove || actionWinrate > bestWinrate)
-            bestWinrate = actionWinrate;
-          foundAnalyzedMove = true;
-          if(action.move == node.moveFromParent) {
-            playedWinrate = actionWinrate;
-            foundPlayedMove = true;
-          }
-        }
-        parentAction = action.nextAction;
-        parentActionsTraversed += 1;
-      }
-      if(foundPlayedMove && foundAnalyzedMove) {
-        item.qualityDeltaPercent = (playedWinrate - bestWinrate) * 100.0f;
+    if(node.parent != kInvalidNode && node.parent < nodes.size()) {
+      float quality = 0.0f;
+      if(qualityDeltaPercentForParentAction(nodes[node.parent], node.moveFromParent, quality)) {
+        item.qualityDeltaPercent = quality;
         item.hasQualityDelta = true;
       }
     }
@@ -1310,47 +1410,193 @@ RootSnapshot MCTSStore::snapshotLight(
   size_t maxVisibleNodes,
   bool includeOwnership
 ) const {
-  RootSnapshot full = snapshot();
-  if(!includeOwnership) {
-    full.hasOwnership = false;
-    full.ownership.fill(0.0f);
+  // True light path: do not allocate/walk a full visible-tree snapshot.
+  RootSnapshot snap;
+  if(root >= nodes.size())
+    return snap;
+  const Node& rootNode = nodes[root];
+  snap.root = root;
+  snap.rootLineageHash = rootNode.lineageHash;
+  snap.rootVisits = rootNode.visits;
+  snap.rootWinrate = rootNode.visits > 0 ? displayWinrate(rootNode.stats, rootNode.nextPla) : 0.0f;
+  snap.rootScoreMean = rootNode.visits > 0 ? displayScoreMean(rootNode.stats, rootNode.nextPla) : 0.0f;
+
+  if(includeOwnership &&
+     rootNode.ownershipOffset != kInvalidNode &&
+     rootNode.ownershipOffset + kOwnershipDim <= ownershipArena.size()) {
+    std::copy(
+      ownershipArena.begin() + rootNode.ownershipOffset,
+      ownershipArena.begin() + rootNode.ownershipOffset + kOwnershipDim,
+      snap.ownership.begin()
+    );
+    snap.hasOwnership = true;
   }
-  if(maxCandidates > 0 && full.candidates.size() > maxCandidates)
-    full.candidates.resize(maxCandidates);
 
-  if(maxVisibleNodes == 0 || full.visibleTree.size() <= maxVisibleNodes)
-    return full;
+  // Top-K candidates from root actions only (same ordering as full snapshot).
+  {
+    AnalyzeDisplayPayload display{};
+    fillAnalyzeDisplay(display, maxCandidates == 0 ? kAnalyzeDisplayMaxCandidates : maxCandidates, false);
+    snap.candidates.reserve(display.candidateCount);
+    for(uint32_t i = 0; i < display.candidateCount; ++i) {
+      CandidateSnapshot candidate;
+      candidate.move = display.candidates[i].move;
+      candidate.visits = display.candidates[i].visits;
+      candidate.winrate = display.candidates[i].winrate;
+      candidate.scoreMean = display.candidates[i].scoreMean;
+      // prior/utility not on display payload — leave default 0.
+      snap.candidates.push_back(candidate);
+    }
+  }
 
-  // Always keep the path from root-of-game to current root, then fill remaining
-  // slots with earliest plies (sorted order is already by ply, then id).
+  // Visible tree: always keep current-root path; then BFS-ish fill by ply from visible set.
+  const size_t cap = maxVisibleNodes == 0 ? nodes.size() : maxVisibleNodes;
   std::unordered_set<NodeId> keep;
-  NodeId cursor = root;
-  while(cursor != kInvalidNode && cursor < nodes.size()) {
-    keep.insert(cursor);
-    if(nodes[cursor].parent == kInvalidNode)
-      break;
-    cursor = nodes[cursor].parent;
+  keep.reserve(64);
+  {
+    NodeId cursor = root;
+    while(cursor != kInvalidNode && cursor < nodes.size()) {
+      keep.insert(cursor);
+      if(nodes[cursor].parent == kInvalidNode)
+        break;
+      cursor = nodes[cursor].parent;
+    }
   }
-  std::vector<TreeNodeSnapshot> trimmed;
-  trimmed.reserve(std::min(maxVisibleNodes, full.visibleTree.size()));
-  for(const TreeNodeSnapshot& item : full.visibleTree) {
-    if(keep.count(item.id) != 0)
-      trimmed.push_back(item);
+
+  auto fillTreeNode = [&](NodeId id) -> TreeNodeSnapshot {
+    const Node& node = nodes[id];
+    NodeId parent = node.parent;
+    while(parent != kInvalidNode && (parent >= visible.size() || !visible[parent]))
+      parent = nodes[parent].parent;
+    TreeNodeSnapshot item;
+    item.id = id;
+    item.lineageHash = node.lineageHash;
+    item.parent = parent;
+    item.moveFromParent = node.moveFromParent;
+    item.movePla = node.movePla;
+    item.ply = node.ply;
+    item.visits = node.visits;
+    item.analyzed = node.visits > 0;
+    item.winrate = item.analyzed ? displayWinrate(node.stats, node.nextPla) : 0.0f;
+    item.scoreMean = item.analyzed ? displayScoreMean(node.stats, node.nextPla) : 0.0f;
+    if(node.parent != kInvalidNode && node.parent < nodes.size()) {
+      float quality = 0.0f;
+      if(qualityDeltaPercentForParentAction(nodes[node.parent], node.moveFromParent, quality)) {
+        item.qualityDeltaPercent = quality;
+        item.hasQualityDelta = true;
+      }
+    }
+    return item;
+  };
+
+  snap.visibleTree.reserve(std::min(cap, nodes.size()));
+  for(NodeId id : keep) {
+    if(id < nodes.size() && id < visible.size() && visible[id])
+      snap.visibleTree.push_back(fillTreeNode(id));
   }
-  for(const TreeNodeSnapshot& item : full.visibleTree) {
-    if(trimmed.size() >= maxVisibleNodes)
-      break;
-    if(keep.count(item.id) != 0)
-      continue;
-    trimmed.push_back(item);
+  if(snap.visibleTree.size() < cap) {
+    // Add remaining visible nodes in id order until cap (cheap, deterministic).
+    for(NodeId id = 0; id < nodes.size() && snap.visibleTree.size() < cap; ++id) {
+      if(id >= visible.size() || !visible[id])
+        continue;
+      if(keep.count(id) != 0)
+        continue;
+      snap.visibleTree.push_back(fillTreeNode(id));
+    }
   }
-  std::sort(trimmed.begin(), trimmed.end(), [](const auto& a, const auto& b) {
+  std::sort(snap.visibleTree.begin(), snap.visibleTree.end(), [](const auto& a, const auto& b) {
     if(a.ply != b.ply)
       return a.ply < b.ply;
     return a.id < b.id;
   });
-  full.visibleTree = std::move(trimmed);
-  return full;
+  return snap;
+}
+
+void MCTSStore::fillAnalyzeDisplay(
+  AnalyzeDisplayPayload& out,
+  size_t maxCandidates,
+  bool includeOwnership
+) const {
+  out.root = root;
+  out.candidateCount = 0;
+  out.rootVisits = 0;
+  out.rootWinrate = 0.5f;
+  out.rootScoreMean = 0.0f;
+  out.hasOwnership = 0;
+  if(root >= nodes.size())
+    return;
+
+  const Node& rootNode = nodes[root];
+  out.rootVisits = rootNode.visits;
+  out.rootWinrate = rootNode.visits > 0 ? displayWinrate(rootNode.stats, rootNode.nextPla) : 0.5f;
+  out.rootScoreMean = rootNode.visits > 0 ? displayScoreMean(rootNode.stats, rootNode.nextPla) : 0.0f;
+
+  const size_t cap = std::min(maxCandidates, kAnalyzeDisplayMaxCandidates);
+  // Online top-K by visits (then prior). O(B · K) with K≤10 — avoids 362-entry partial_sort.
+  struct Entry {
+    Move move = kMovePass;
+    VisitCount visits = 0;
+    float prior = 0.0f;
+    float winrate = 0.0f;
+    float scoreMean = 0.0f;
+  };
+  Entry top[kAnalyzeDisplayMaxCandidates];
+  size_t topCount = 0;
+  auto better = [](const Entry& a, const Entry& b) {
+    if(a.visits != b.visits)
+      return a.visits > b.visits;
+    return a.prior > b.prior;
+  };
+  ActionId actionId = rootNode.firstAction;
+  uint32_t traversed = 0;
+  while(actionId != kInvalidAction && traversed < rootNode.actionCount) {
+    if(actionId >= actions.size())
+      break;
+    const Action& action = actions[actionId];
+    Entry e;
+    e.move = action.move;
+    e.visits = action.visits;
+    e.prior = policyPrior(rootNode, action.move);
+    e.winrate = action.visits > 0 ? displayWinrate(action.stats, rootNode.nextPla) : 0.0f;
+    e.scoreMean = action.visits > 0 ? displayScoreMean(action.stats, rootNode.nextPla) : 0.0f;
+    if(topCount < cap) {
+      top[topCount++] = e;
+      // Insertion keep small array sorted best→worst.
+      for(size_t i = topCount - 1; i > 0; --i) {
+        if(better(top[i], top[i - 1]))
+          std::swap(top[i], top[i - 1]);
+        else
+          break;
+      }
+    } else if(better(e, top[cap - 1])) {
+      top[cap - 1] = e;
+      for(size_t i = cap - 1; i > 0; --i) {
+        if(better(top[i], top[i - 1]))
+          std::swap(top[i], top[i - 1]);
+        else
+          break;
+      }
+    }
+    actionId = action.nextAction;
+    traversed += 1;
+  }
+  out.candidateCount = static_cast<uint32_t>(topCount);
+  for(size_t i = 0; i < topCount; ++i) {
+    out.candidates[i].move = top[i].move;
+    out.candidates[i].visits = static_cast<uint32_t>(std::min<VisitCount>(top[i].visits, 0xffffffffu));
+    out.candidates[i].winrate = top[i].winrate;
+    out.candidates[i].scoreMean = top[i].scoreMean;
+  }
+
+  if(includeOwnership &&
+     rootNode.ownershipOffset != kInvalidNode &&
+     rootNode.ownershipOffset + kOwnershipDim <= ownershipArena.size()) {
+    std::copy(
+      ownershipArena.begin() + rootNode.ownershipOffset,
+      ownershipArena.begin() + rootNode.ownershipOffset + kOwnershipDim,
+      out.ownership
+    );
+    out.hasOwnership = 1;
+  }
 }
 
 StoreMemoryStats MCTSStore::memoryStats() const {
@@ -1411,6 +1657,40 @@ MCTSStore MCTSStore::cloneVisibleRecord(
   std::string switchError;
   if(!clone.switchRoot(target->second, &switchError) && error)
     *error = switchError;
+  return clone;
+}
+
+MCTSStore MCTSStore::cloneCurrentRootPath(
+  const Rules& rules,
+  const AnalysisKey& analysisKey,
+  const SearchParams& searchParams,
+  std::string* error
+) const {
+  if(error)
+    error->clear();
+  MCTSStore clone = MCTSStore::create(initialBoardState, rules, analysisKey, searchParams);
+  if(root == kInvalidNode || root >= nodes.size()) {
+    if(error) *error = "current root is invalid";
+    return clone;
+  }
+  // Collect moves from game root → current root (O(ply)).
+  std::vector<Move> pathMoves;
+  NodeId cursor = root;
+  while(cursor != kInvalidNode && cursor < nodes.size()) {
+    const Node& node = nodes[cursor];
+    if(node.parent == kInvalidNode)
+      break;
+    pathMoves.push_back(node.moveFromParent);
+    cursor = node.parent;
+  }
+  std::reverse(pathMoves.begin(), pathMoves.end());
+  for(Move move : pathMoves) {
+    PlayMoveCommit commit = clone.playMoveFromRoot(move);
+    if(!commit.ok) {
+      if(error) *error = "current root path is illegal under target rules: " + commit.error;
+      return clone;
+    }
+  }
   return clone;
 }
 
@@ -1678,7 +1958,18 @@ bool MCTSStore::validate(std::string* error) const {
         return false;
       }
       seenMoves[action.move] = 1;
-      if(node.state != NodeState::expanded || policyPrior(node, action.move) < 0.0f) {
+      // Search actions require an expanded parent with non-negative prior.
+      // commitMove also creates action→child links for played moves *before*
+      // the parent is expanded (redo / PV). Those navigation play-links are
+      // valid when the child pointer is consistent, even without policy yet.
+      const bool expandedWithPrior =
+        node.state == NodeState::expanded && policyPrior(node, action.move) >= 0.0f;
+      const bool navigationPlayLink =
+        action.child != kInvalidNode &&
+        action.child < nodes.size() &&
+        nodes[action.child].parent == i &&
+        nodes[action.child].moveFromParent == action.move;
+      if(!expandedWithPrior && !navigationPlayLink) {
         if(error) *error = "action move is absent from parent policy";
         return false;
       }
@@ -1781,12 +2072,13 @@ bool MCTSStore::validate(std::string* error) const {
     }
   }
   const auto materializedRoot = materializePosition(root);
-  if(!materializedRoot || materializedRoot->cells != rootBoardState.cells ||
-     materializedRoot->nextPla != rootBoardState.nextPla ||
-     materializedRoot->simpleKoPoint != rootBoardState.simpleKoPoint ||
-     materializedRoot->boardHashHistory != rootBoardState.boardHashHistory ||
-     materializedRoot->situationHashHistory != rootBoardState.situationHashHistory ||
-     materializedRoot->moves.size() != rootBoardState.moves.size())
+  const BoardState& rootBoardRef = rootBoard();
+  if(!materializedRoot || materializedRoot->cells != rootBoardRef.cells ||
+     materializedRoot->nextPla != rootBoardRef.nextPla ||
+     materializedRoot->simpleKoPoint != rootBoardRef.simpleKoPoint ||
+     materializedRoot->boardHashHistory != rootBoardRef.boardHashHistory ||
+     materializedRoot->situationHashHistory != rootBoardRef.situationHashHistory ||
+     materializedRoot->moves.size() != rootBoardRef.moves.size())
     return fail("cached root board does not match its persistent lineage");
   return true;
 }
@@ -1917,20 +2209,93 @@ std::vector<uint8_t> MCTSStore::serialize() const {
     w.writeU64(action.visits);
     writeStats(action.stats);
   }
-  for(float value : policyArena)
-    w.writeFloat(value);
-  for(float value : ownershipArena)
-    w.writeFloat(value);
-  for(NodeId id : ancestorArena)
-    w.writeU32(id);
-  for(uint8_t value : visible)
-    w.writeU8(value);
+  // Bulk memory image of the large arenas (dominant on-disk size). On little-endian
+  // IEEE-754 targets this is byte-identical to per-element writeFloat/writeU32.
+  static_assert(sizeof(float) == 4, "policy/ownership bulk write assumes binary32 float");
+  static_assert(sizeof(NodeId) == 4, "ancestor bulk write assumes 32-bit NodeId");
+  if(!policyArena.empty())
+    w.writeBytes(policyArena.data(), policyArena.size() * sizeof(float));
+  if(!ownershipArena.empty())
+    w.writeBytes(ownershipArena.data(), ownershipArena.size() * sizeof(float));
+  if(!ancestorArena.empty())
+    w.writeBytes(ancestorArena.data(), ancestorArena.size() * sizeof(NodeId));
+  if(!visible.empty())
+    w.writeBytes(visible.data(), visible.size());
 
   if(w.bytes.size() > kMaxSerializedBytes - sizeof(uint64_t))
     return {};
   const uint64_t checksum = checksum64(w.bytes.data(), w.bytes.size());
   w.writeU64(checksum);
   return std::move(w.bytes);
+}
+
+bool MCTSStore::persistToFile(const std::string& path, std::string* error) const {
+  // Encode once into a contiguous memory image of the store, then fopen("wb") +
+  // fwrite the whole blob and fread/mmap it back on load. No per-node file I/O.
+  // (Arenas already dominate the blob size; this is a direct memory image write.)
+  const std::vector<uint8_t> bytes = serialize();
+  if(bytes.empty()) {
+    if(error) *error = "serialized store exceeds the core-state byte limit";
+    return false;
+  }
+  const std::string temp = path + ".tmp";
+  auto requireRegularOrMissing = [&](const std::string& candidate, bool removeRegular) {
+    struct stat metadata;
+    if(lstat(candidate.c_str(), &metadata) != 0)
+      return errno == ENOENT;
+    if(!S_ISREG(metadata.st_mode))
+      return false;
+    return !removeRegular || std::remove(candidate.c_str()) == 0;
+  };
+  if(!requireRegularOrMissing(path, false)) {
+    if(error) *error = "output target is not a regular file or is inaccessible: " + path;
+    return false;
+  }
+  if(!requireRegularOrMissing(temp, true)) {
+    if(error) *error = "temporary output target is not a removable regular file: " + temp;
+    return false;
+  }
+
+  FILE* file = std::fopen(temp.c_str(), "wb");
+  if(file == nullptr) {
+    if(error) *error = "could not open store file for writing (wb): " + temp;
+    return false;
+  }
+  size_t offset = 0;
+  while(offset < bytes.size()) {
+    const size_t count = std::fwrite(bytes.data() + offset, 1, bytes.size() - offset, file);
+    if(count == 0) {
+      std::fclose(file);
+      std::remove(temp.c_str());
+      if(error) *error = "fwrite failed while writing store blob: " + temp;
+      return false;
+    }
+    offset += count;
+  }
+  if(std::fflush(file) != 0) {
+    std::fclose(file);
+    std::remove(temp.c_str());
+    if(error) *error = "fflush failed for store blob: " + temp;
+    return false;
+  }
+  const int fd = fileno(file);
+  if(fd >= 0 && fsync(fd) != 0) {
+    std::fclose(file);
+    std::remove(temp.c_str());
+    if(error) *error = "fsync failed for store blob: " + temp;
+    return false;
+  }
+  if(std::fclose(file) != 0) {
+    std::remove(temp.c_str());
+    if(error) *error = "fclose failed for store blob: " + temp;
+    return false;
+  }
+  if(std::rename(temp.c_str(), path.c_str()) != 0) {
+    std::remove(temp.c_str());
+    if(error) *error = "could not atomically replace store file: " + path;
+    return false;
+  }
+  return true;
 }
 
 std::optional<MCTSStore> MCTSStore::deserialize(
@@ -1941,12 +2306,12 @@ std::optional<MCTSStore> MCTSStore::deserialize(
   return deserialize(bytes.data(), bytes.size(), error, progress);
 }
 
-std::optional<MCTSStore> MCTSStore::deserializeFromFile(
+std::optional<MCTSStore> MCTSStore::loadFromFile(
   const std::string& path,
   uint64_t maxBytes,
-  std::string* error,
-  const DeserializeProgressFn& progress
+  std::string* error
 ) {
+  // One-shot read: map or read the entire blob once, then parse once. No streaming.
   int flags = O_RDONLY;
 #ifdef O_CLOEXEC
   flags |= O_CLOEXEC;
@@ -1969,34 +2334,26 @@ std::optional<MCTSStore> MCTSStore::deserializeFromFile(
     return std::nullopt;
   }
   const size_t fileSize = static_cast<size_t>(metadata.st_size);
-  reportDeserializeProgress(progress, "reading", 0.02, 0, fileSize, "Opening store file");
 
-  // Prefer mmap to avoid a second full copy of huge stores.
   void* mapped = mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0);
   if(mapped != MAP_FAILED) {
     close(fd);
-#ifdef MADV_SEQUENTIAL
-    (void)madvise(mapped, fileSize, MADV_SEQUENTIAL);
-#endif
-    reportDeserializeProgress(progress, "reading", 0.35, fileSize, fileSize, "Mapped store file");
+    // Silent parse: product rehydrate never streams progress.
     auto store = deserialize(
       static_cast<const uint8_t*>(mapped),
       fileSize,
       error,
-      progress
+      {}
     );
     munmap(mapped, fileSize);
     return store;
   }
 
-  // Fallback: chunked read with true byte progress.
-  std::vector<uint8_t> bytes;
-  bytes.resize(fileSize);
+  // Fallback: one full-buffer read (not progressive unit streaming).
+  std::vector<uint8_t> bytes(fileSize);
   size_t offset = 0;
-  constexpr size_t kChunk = 1024ULL * 1024ULL;
   while(offset < bytes.size()) {
-    const size_t want = std::min(kChunk, bytes.size() - offset);
-    const ssize_t count = read(fd, bytes.data() + offset, want);
+    const ssize_t count = read(fd, bytes.data() + offset, bytes.size() - offset);
     if(count < 0 && errno == EINTR)
       continue;
     if(count <= 0) {
@@ -2005,20 +2362,22 @@ std::optional<MCTSStore> MCTSStore::deserializeFromFile(
       return std::nullopt;
     }
     offset += static_cast<size_t>(count);
-    reportDeserializeProgress(
-      progress,
-      "reading",
-      0.02 + 0.33 * (static_cast<double>(offset) / static_cast<double>(fileSize)),
-      static_cast<uint64_t>(offset),
-      static_cast<uint64_t>(fileSize),
-      "Reading store file"
-    );
   }
   if(close(fd) != 0) {
     if(error) *error = "could not close store file: " + path;
     return std::nullopt;
   }
-  return deserialize(bytes.data(), bytes.size(), error, progress);
+  return deserialize(bytes.data(), bytes.size(), error, {});
+}
+
+std::optional<MCTSStore> MCTSStore::deserializeFromFile(
+  const std::string& path,
+  uint64_t maxBytes,
+  std::string* error,
+  const DeserializeProgressFn& progress
+) {
+  (void)progress; // Streaming progress removed from product file I/O.
+  return loadFromFile(path, maxBytes, error);
 }
 
 std::optional<MCTSStore> MCTSStore::deserialize(
@@ -2416,7 +2775,8 @@ std::optional<MCTSStore> MCTSStore::deserialize(
     if(error) *error = "could not materialize root";
     return std::nullopt;
   }
-  store.rootBoardState = std::move(*materialized);
+  store.storeBoardCache(store.root, std::move(*materialized));
+  store.rootBoardPtr = store.boardCacheFor(store.root);
   if(!store.validate(error))
     return std::nullopt;
   reportDeserializeProgress(progress, "complete", 1.0, 1, 1, "Deserialize complete");

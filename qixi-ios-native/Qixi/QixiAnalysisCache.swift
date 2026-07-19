@@ -75,14 +75,16 @@ struct QixiAnalysisCache {
     moves: [BoardMove],
     setupStones: [BoardSetupStone] = [],
     komi: Double,
-    rootNoise: Double
+    rootNoise: Double,
+    rootToMove: StoneColor = .black
   ) -> String {
     QixiPositionIdentity.cacheKey(
       engine: engine,
       moves: moves,
       setupStones: setupStones,
       komi: komi,
-      rootNoise: rootNoise
+      rootNoise: rootNoise,
+      rootToMove: rootToMove
     )
   }
 }

@@ -4,7 +4,6 @@ import QuartzCore
 
 @main
 struct QixiApp: App {
-  @Environment(\.scenePhase) private var scenePhase
   @StateObject private var model = QixiViewModel()
 
   var body: some Scene {
@@ -13,25 +12,9 @@ struct QixiApp: App {
         .background(QixiFrameRatePreferenceView().frame(width: 0, height: 0))
         .statusBarHidden(true)
         .preferredColorScheme(.light)
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
-          model.handleLifecycleTombstone(reason: "willTerminate")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-          model.handleLifecycleTombstone(reason: "didEnterBackground")
-        }
     }
-    .onChange(of: scenePhase) { _, phase in
-      switch phase {
-      case .background:
-        model.handleLifecycleTombstone(reason: "scenePhase.background")
-      case .inactive:
-        model.handleLifecycleTombstone(reason: "scenePhase.inactive")
-      case .active:
-        model.handleLifecycleForeground()
-      @unknown default:
-        model.handleLifecycleTombstone(reason: "scenePhase.unknown")
-      }
-    }
+    // No background / terminate tombstone or foreground restore actions.
+    // No autosave / auto-sync. MCTS checkpoint remains for OOM hard unload only.
   }
 }
 

@@ -53,10 +53,19 @@ size_t gMinStartMove = 50; // inclusive, 1-based move number in SGF line
 size_t gSequenceLen = 32;
 uint64_t gAdditionalAnalyses = 128;
 constexpr uint64_t kMasterSeed = 0x514958494f52434cULL; // "QIXIORCL"
-// When true (default for this harness), custom selection is NN-policy-only so
-// historical subtree visits cannot contaminate trajectories. Requires
-// qixi_core_testing. Official Search still uses its native selector (documented).
+// When true (default for this harness), both engines use NN-policy-only selection.
 bool gUseTestNnPolicyOnly = true;
+// Focused stress mode: only the historically worst interval, higher visit budget,
+// and random memory unload/reload for persistent-MCTS.
+bool gFocusWorstInterval = false;
+// Worst interval from past both-policy-only runs (mean/max |dWR| dominated by G2).
+const char* kWorstSgfName = "training-games_F3ECC1869E66B82B6F89402937291CDF.sgf";
+constexpr size_t kWorstWindowStartMove1Based = 209;
+// Relative root sequence recorded for that interval in past oracle runs.
+const std::vector<size_t> kWorstRootSequenceRel = {
+  18, 20, 19, 20, 17, 15, 14, 13, 10, 11, 14, 15, 14, 15, 17, 19,
+  17, 18, 19, 20, 19, 20, 19, 20, 19, 17, 14, 16, 13, 10, 9, 11
+};
 
 struct StepRecord {
   size_t step = 0;
@@ -72,6 +81,7 @@ struct StepRecord {
   float officialScoreLead = 0.0f;
   core::Move officialBestMove = core::kMovePass;
   bool analysisCountMatched = false;
+  bool didMemoryUnloadReload = false;
 };
 
 struct GameRecord {
@@ -245,7 +255,8 @@ bool runOneGame(
   analysis::AnalysisEngine& custom,
   analysis::AnalysisEngine& official,
   GameRecord& record,
-  std::ostream& log
+  std::ostream& log,
+  const std::vector<bool>& unloadReloadAtStep
 ) {
   record.sgfPath = sgfPath.string();
   record.windowStartMove = windowStart0 + 1;
@@ -351,6 +362,27 @@ bool runOneGame(
     s.officialBestMove = oObs.bestMove;
     s.analysisCountMatched = (s.officialAnalysesAfter == s.customAnalysesAfter);
 
+    // Random memory unload/reload after analysis (persistent-MCTS stress).
+    if(step < unloadReloadAtStep.size() && unloadReloadAtStep[step]) {
+      err.clear();
+      if(!custom.memoryUnloadAndReload(&err)) {
+        record.error = "custom memoryUnloadAndReload: " + err;
+        return false;
+      }
+      err.clear();
+      if(!official.memoryUnloadAndReload(&err)) {
+        record.error = "official memoryUnloadAndReload: " + err;
+        return false;
+      }
+      // Re-check root visit totals survive the round-trip.
+      if(custom.rootAnalysisCount() != s.customAnalysesAfter ||
+         official.rootAnalysisCount() != s.officialAnalysesAfter) {
+        record.error = "visit totals changed across memory unload/reload";
+        return false;
+      }
+      s.didMemoryUnloadReload = true;
+    }
+
     log << "  step " << std::setw(2) << step
         << " ply=" << absPly
         << " customVisits=" << s.customAnalysesAfter
@@ -366,7 +398,11 @@ bool runOneGame(
         << " matchVisits=" << (s.analysisCountMatched ? "yes" : "NO")
         << " dWR=" << (s.officialWinrate - s.customWinrate)
         << " dPts=" << (s.officialScoreLead - s.customScoreLead)
+        << (s.didMemoryUnloadReload ? " unloadReload=yes" : "")
         << "\n";
+    // Flush so long 4k-visit runs show progress.
+    log << std::flush;
+    std::cout << std::flush;
 
     record.steps.push_back(s);
   }
@@ -384,6 +420,8 @@ void writeJsonReport(const fs::path& path, const std::vector<GameRecord>& games)
   out << "  \"sequenceLen\": " << gSequenceLen << ",\n";
   out << "  \"additionalAnalyses\": " << gAdditionalAnalyses << ",\n";
   out << "  \"numSearchThreads\": 1,\n";
+  out << "  \"focusWorstInterval\": " << (gFocusWorstInterval ? "true" : "false") << ",\n";
+  out << "  \"testNnPolicyOnly\": " << (gUseTestNnPolicyOnly ? "true" : "false") << ",\n";
   out << "  \"games\": [\n";
   for(size_t gi = 0; gi < games.size(); ++gi) {
     const GameRecord& g = games[gi];
@@ -415,7 +453,8 @@ void writeJsonReport(const fs::path& path, const std::vector<GameRecord>& games)
       out << "          \"officialWinrate\": " << s.officialWinrate << ",\n";
       out << "          \"officialScoreLead\": " << s.officialScoreLead << ",\n";
       out << "          \"officialBestMove\": " << std::quoted(moveToStr(s.officialBestMove)) << ",\n";
-      out << "          \"analysisCountMatched\": " << (s.analysisCountMatched ? "true" : "false") << "\n";
+      out << "          \"analysisCountMatched\": " << (s.analysisCountMatched ? "true" : "false") << ",\n";
+      out << "          \"didMemoryUnloadReload\": " << (s.didMemoryUnloadReload ? "true" : "false") << "\n";
       out << "        }" << (si + 1 < g.steps.size() ? "," : "") << "\n";
     }
     out << "      ]\n";
@@ -433,6 +472,7 @@ int main(int argc, char** argv) {
   std::string reportPath = "/private/tmp/qixi_oracle_correctness_report.json";
   std::string logPath = "/private/tmp/qixi_oracle_correctness.log";
   uint64_t seed = kMasterSeed;
+  double unloadReloadProb = 0.35; // used in focus-worst mode
 
   for(int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -465,13 +505,26 @@ int main(int argc, char** argv) {
       gUseTestNnPolicyOnly = true;
     else if(arg == "--no-policy-only")
       gUseTestNnPolicyOnly = false;
+    else if(arg == "--focus-worst-interval") {
+      // Historically worst interval (G2): only that SGF window + fixed root seq.
+      gFocusWorstInterval = true;
+      gNumGames = 1;
+      gWindowMoves = 20;
+      gSequenceLen = kWorstRootSequenceRel.size();
+      gAdditionalAnalyses = 4096;
+      gUseTestNnPolicyOnly = true;
+    }
+    else if(arg == "--unload-reload-prob")
+      unloadReloadProb = std::stod(need("--unload-reload-prob"));
     else if(arg == "--help") {
       std::cout << "Usage: qixi_oracle_correctness --model PATH --sgfs DIR "
                    "[--seed N] [--num-games 8] [--window-moves 20] "
                    "[--sequence-len 32] [--additional 128] "
-                   "[--policy-only|--no-policy-only]\n"
-                   "  --policy-only (default): custom engine selects by NN prior only "
-                   "(test mode; requires qixi_core_testing).\n";
+                   "[--policy-only|--no-policy-only] "
+                   "[--focus-worst-interval] [--unload-reload-prob P]\n"
+                   "  --focus-worst-interval: only the past worst SGF window "
+                   "(F3ECC… @ move 209), +4096 visits, fixed root sequence, "
+                   "random memory unload/reload for persistent-MCTS stress.\n";
       return 0;
     }
   }
@@ -488,10 +541,20 @@ int main(int argc, char** argv) {
   tee("sgfs=" + sgfDir + "\n");
   tee("seed=" + std::to_string(seed) + "\n");
   tee(std::string("testNnPolicyOnly=") + (gUseTestNnPolicyOnly ? "true" : "false") + "\n");
+  tee(std::string("focusWorstInterval=") + (gFocusWorstInterval ? "true" : "false") + "\n");
+  tee("additionalAnalyses=" + std::to_string(gAdditionalAnalyses) + "\n");
   if(gUseTestNnPolicyOnly) {
     tee("NOTE: BOTH engines use NN-policy-only selection for this test. "
         "Custom keeps a persistent store; official rebuilds a fresh store on each "
         "setRootPly (non-persistent). See docs/oracle-test-discrepancies.md.\n");
+  }
+  if(gFocusWorstInterval) {
+    tee("FOCUS: only worst historical interval ");
+    tee(std::string(kWorstSgfName) + " windowStart=" +
+        std::to_string(kWorstWindowStartMove1Based) +
+        " +=" + std::to_string(gAdditionalAnalyses) +
+        " with random memory unload/reload (p=" +
+        std::to_string(unloadReloadProb) + ")\n");
   }
 
   std::string err;
@@ -506,69 +569,125 @@ int main(int argc, char** argv) {
   auto custom = analysis::createCustomAnalysisEngine(&customEval);
   auto official = oracle::createOfficialAnalysisEngine(nnCtx.get());
 
-  // Collect eligible SGFs with >100 legal alternating moves and no handicap.
-  std::vector<fs::path> candidates;
-  std::vector<analysis::GameLine> candidateLines;
-  std::vector<size_t> candidateMoveCounts;
-  for(const fs::path& p : listLongSgfs(sgfDir)) {
-    analysis::GameLine line;
-    size_t mc = 0;
-    std::string e;
-    if(!loadGameLineFromSgf(p, line, mc, &e))
-      continue;
-    if(mc <= 100)
-      continue;
-    if(mc < gMinStartMove + gWindowMoves)
-      continue;
-    candidates.push_back(p);
-    candidateLines.push_back(std::move(line));
-    candidateMoveCounts.push_back(mc);
-  }
-  tee("eligible sgfs: " + std::to_string(candidates.size()) + "\n");
-  if(candidates.size() < gNumGames) {
-    tee("FATAL: need at least " + std::to_string(gNumGames) + " eligible SGF files\n");
-    return 1;
-  }
-
   std::mt19937_64 rng(seed);
-  std::vector<size_t> indices(candidates.size());
-  std::iota(indices.begin(), indices.end(), 0);
-  std::shuffle(indices.begin(), indices.end(), rng);
-  indices.resize(gNumGames);
-
   std::vector<GameRecord> games;
-  games.reserve(gNumGames);
   size_t infraFailures = 0;
   size_t visitMismatches = 0;
   size_t totalSteps = 0;
+  size_t unloadReloadCount = 0;
 
-  for(size_t idx : indices) {
-    const fs::path& path = candidates[idx];
-    const size_t mc = candidateMoveCounts[idx];
-    // Window start move number >= 50 (1-based) => start0 >= 49
-    // Need start0 + 20 <= mc
-    const size_t minStart0 = gMinStartMove - 1;
-    const size_t maxStart0 = mc - gWindowMoves;
-    if(maxStart0 < minStart0) {
-      ++infraFailures;
-      continue;
+  struct Job {
+    fs::path path;
+    size_t windowStart0 = 0;
+    std::vector<size_t> seq;
+  };
+  std::vector<Job> jobs;
+
+  if(gFocusWorstInterval) {
+    const fs::path path = fs::path(sgfDir) / kWorstSgfName;
+    if(!fs::exists(path)) {
+      tee("FATAL: worst-interval SGF not found: " + path.string() + "\n");
+      return 1;
     }
-    std::uniform_int_distribution<size_t> startDist(minStart0, maxStart0);
-    const size_t windowStart0 = startDist(rng);
-    const auto seq = makeRootSequence(gWindowMoves, gSequenceLen, rng);
+    analysis::GameLine line;
+    size_t mc = 0;
+    std::string e;
+    if(!loadGameLineFromSgf(path, line, mc, &e) || mc < kWorstWindowStartMove1Based + gWindowMoves) {
+      tee("FATAL: cannot load worst-interval SGF: " + e + " moves=" + std::to_string(mc) + "\n");
+      return 1;
+    }
+    Job job;
+    job.path = path;
+    job.windowStart0 = kWorstWindowStartMove1Based - 1;
+    job.seq = kWorstRootSequenceRel;
+    if(job.seq.size() != gSequenceLen)
+      gSequenceLen = job.seq.size();
+    jobs.push_back(std::move(job));
+  } else {
+    std::vector<fs::path> candidates;
+    std::vector<size_t> candidateMoveCounts;
+    for(const fs::path& p : listLongSgfs(sgfDir)) {
+      analysis::GameLine line;
+      size_t mc = 0;
+      std::string e;
+      if(!loadGameLineFromSgf(p, line, mc, &e))
+        continue;
+      if(mc <= 100)
+        continue;
+      if(mc < gMinStartMove + gWindowMoves)
+        continue;
+      candidates.push_back(p);
+      candidateMoveCounts.push_back(mc);
+    }
+    tee("eligible sgfs: " + std::to_string(candidates.size()) + "\n");
+    if(candidates.size() < gNumGames) {
+      tee("FATAL: need at least " + std::to_string(gNumGames) + " eligible SGF files\n");
+      return 1;
+    }
+    std::vector<size_t> indices(candidates.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    std::shuffle(indices.begin(), indices.end(), rng);
+    indices.resize(gNumGames);
+    for(size_t idx : indices) {
+      const size_t mc = candidateMoveCounts[idx];
+      const size_t minStart0 = gMinStartMove - 1;
+      const size_t maxStart0 = mc - gWindowMoves;
+      if(maxStart0 < minStart0) {
+        ++infraFailures;
+        continue;
+      }
+      std::uniform_int_distribution<size_t> startDist(minStart0, maxStart0);
+      Job job;
+      job.path = candidates[idx];
+      job.windowStart0 = startDist(rng);
+      job.seq = makeRootSequence(gWindowMoves, gSequenceLen, rng);
+      jobs.push_back(std::move(job));
+    }
+  }
+
+  games.reserve(jobs.size());
+  for(const Job& job : jobs) {
+    std::vector<bool> unloadAt(job.seq.size(), false);
+    if(gFocusWorstInterval && job.seq.size() > 0) {
+      std::bernoulli_distribution coin(unloadReloadProb);
+      size_t count = 0;
+      for(size_t i = 0; i < job.seq.size(); ++i) {
+        // Never unload on the last step only constraint: allow all steps.
+        if(coin(rng)) {
+          unloadAt[i] = true;
+          ++count;
+        }
+      }
+      // Guarantee at least two unload/reloads in the focused stress test.
+      if(count < 2 && job.seq.size() >= 2) {
+        unloadAt[job.seq.size() / 3] = true;
+        unloadAt[(2 * job.seq.size()) / 3] = true;
+      }
+      tee("  unloadReload steps:");
+      for(size_t i = 0; i < unloadAt.size(); ++i) {
+        if(unloadAt[i])
+          tee(" " + std::to_string(i));
+      }
+      tee("\n");
+    }
 
     GameRecord rec;
-    const bool ok = runOneGame(path, windowStart0, seq, *custom, *official, rec, log);
+    const bool ok = runOneGame(
+      job.path, job.windowStart0, job.seq, *custom, *official, rec, log, unloadAt
+    );
     if(!ok) {
-      tee("GAME FAIL " + path.filename().string() + ": " + rec.error + "\n");
+      tee("GAME FAIL " + job.path.filename().string() + ": " + rec.error + "\n");
       ++infraFailures;
     } else {
       for(const StepRecord& s : rec.steps) {
         ++totalSteps;
         if(!s.analysisCountMatched)
           ++visitMismatches;
+        if(s.didMemoryUnloadReload)
+          ++unloadReloadCount;
       }
-      tee("GAME OK " + path.filename().string() + " steps=" + std::to_string(rec.steps.size()) + "\n");
+      tee("GAME OK " + job.path.filename().string() + " steps=" +
+          std::to_string(rec.steps.size()) + "\n");
     }
     games.push_back(std::move(rec));
   }
@@ -579,12 +698,16 @@ int main(int argc, char** argv) {
   tee("summary: games=" + std::to_string(games.size())
       + " infraFailures=" + std::to_string(infraFailures)
       + " steps=" + std::to_string(totalSteps)
-      + " visitMismatches=" + std::to_string(visitMismatches) + "\n");
-  tee(
-    "NOTE: winrate/score divergence between custom PUCT and official Search is "
-    "expected until search policy equivalence is proven; this run matched visit "
-    "budgets and exercised root transfers fully.\n"
-  );
+      + " visitMismatches=" + std::to_string(visitMismatches)
+      + " unloadReloads=" + std::to_string(unloadReloadCount) + "\n");
+  if(gFocusWorstInterval) {
+    tee("NOTE: focused worst-interval stress with +4096 and random unload/reload.\n");
+  } else {
+    tee(
+      "NOTE: numerical divergence can remain due to persistence vs fresh trees "
+      "and desynced policy RNG; root visit budgets were matched.\n"
+    );
+  }
 
   return infraFailures == 0 ? 0 : 1;
 }

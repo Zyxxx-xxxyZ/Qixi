@@ -2098,10 +2098,15 @@ NativeKataGoResult NativeKataGoCore::loadEngine(const std::string& engineID) {
   );
   if(!result.ok)
     return invalidRequestResult(result.message);
+  // Do NOT serialize a full BackendResult JSON here. The ObjC bridge only checks ok(),
+  // and building snapshot JSON on the switch path was pure waste (and can allocate heavily
+  // right as the previous model is being torn down).
   return {
     NativeKataGoStatusCode::ok,
-    engineID == "none" ? "no engine loaded" : "Native KataGo model loaded.",
-    coreBackendResultJSON(result),
+    result.message.empty()
+      ? (engineID == "none" ? "no engine loaded" : "Native KataGo model loaded.")
+      : result.message,
+    "",
   };
 }
 
@@ -2153,22 +2158,42 @@ bool NativeKataGoCore::selectCoreEngine(
     return true;
   };
 
-  NativeKataGoResult unloadResult = engine->unloadModel();
-  if(!unloadResult.ok()) {
-    error = unloadResult.message;
-    evaluator = engine->coreEvaluator();
-    if(evaluator == nullptr)
-      loadedEngineID = "none";
-    return false;
-  }
-  loadedEngineID = "none";
-  if(modelId == core::ModelId::none)
+  // none: unload only. real model: loadModel builds the new graph first, then
+  // background-destroys the old one — do NOT unload first (that forced a full
+  // Metal free before the new model could start loading).
+  if(modelId == core::ModelId::none) {
+    NativeKataGoResult unloadResult = engine->unloadModel();
+    if(!unloadResult.ok()) {
+      error = unloadResult.message;
+      evaluator = engine->coreEvaluator();
+      if(evaluator == nullptr)
+        loadedEngineID = "none";
+      return false;
+    }
+    loadedEngineID = "none";
     return true;
+  }
+
+  // Already on the requested model — keep evaluator, skip rebuild.
+  if(loadedEngineID == engineID) {
+    evaluator = engine->coreEvaluator();
+    if(evaluator != nullptr)
+      return true;
+    // Fall through to reload if the adapter claims the id but has no evaluator.
+  }
+
   NativeKataGoResult loadResult = engine->loadModel(targetConfig->second);
   if(!loadResult.ok()) {
     error = loadResult.message;
-    engine->unloadModel();
-    restorePreviousModel();
+    // loadModel leaves the previous model active on failure (build-before-swap).
+    evaluator = engine->coreEvaluator();
+    if(evaluator == nullptr) {
+      loadedEngineID = "none";
+      restorePreviousModel();
+    } else {
+      // Still have a live evaluator (prior model) — report failure without wipe.
+      loadedEngineID = previousEngineID;
+    }
     return false;
   }
   evaluator = engine->coreEvaluator();
@@ -2265,9 +2290,35 @@ NativeKataGoResult NativeKataGoCore::submitCoreRequestJSON(const std::string& re
 }
 
 NativeKataGoResult NativeKataGoCore::latestCoreSnapshotJSON() {
-  // UI poll path: light snapshot avoids shipping unbounded visibleTree over the bridge.
-  const core::BackendResult result = coreBackend.latestLightSnapshot(32, 4096, true);
+  // Structure path only (variation). 120 Hz HUD uses tryLoadAnalyzeDisplay.
+  // Cap visible nodes tightly and skip ownership — HUD already publishes ownership.
+  // A 4096-node light snapshot + JSON under stateMutex was multi-second freezes on root switch.
+  const core::BackendResult result = coreBackend.latestLightSnapshot(10, 512, false);
   return {NativeKataGoStatusCode::ok, result.message, coreBackendResultJSON(result)};
+}
+
+uint64_t NativeKataGoCore::publishedAnalyzeRevision() const {
+  return coreBackend.publishedAnalyzeRevision();
+}
+
+bool NativeKataGoCore::tryLoadAnalyzeDisplay(core::AnalyzeDisplayPayload& out) const {
+  return coreBackend.tryLoadAnalyzeDisplay(out);
+}
+
+bool NativeKataGoCore::postNavPlay(uint32_t move, uint64_t uiIntentId) {
+  core::BackendWorker::NavIntent intent;
+  intent.kind = core::BackendWorker::NavIntentKind::play;
+  intent.uiIntentId = uiIntentId;
+  intent.moveOrNode = move;
+  return coreBackend.postNavIntent(intent);
+}
+
+bool NativeKataGoCore::postNavSwitchRoot(uint32_t nodeId, uint64_t uiIntentId) {
+  core::BackendWorker::NavIntent intent;
+  intent.kind = core::BackendWorker::NavIntentKind::switchRoot;
+  intent.uiIntentId = uiIntentId;
+  intent.moveOrNode = nodeId;
+  return coreBackend.postNavIntent(intent);
 }
 
 NativeKataGoResult NativeKataGoCore::coreIoProgressJSON() {
@@ -2278,6 +2329,8 @@ NativeKataGoResult NativeKataGoCore::coreIoProgressJSON() {
   out << "\"active\":" << (progress.active ? "true" : "false");
   out << ",\"phase\":\"" << progress.phase << "\"";
   out << ",\"fraction\":" << progress.fraction;
+  out << ",\"unitsDone\":" << progress.unitsDone;
+  out << ",\"unitsTotal\":" << progress.unitsTotal;
   out << ",\"bytesDone\":" << progress.bytesDone;
   out << ",\"bytesTotal\":" << progress.bytesTotal;
   out << ",\"message\":\"" << progress.message << "\"";

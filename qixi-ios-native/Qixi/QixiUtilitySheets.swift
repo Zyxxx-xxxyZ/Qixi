@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 struct QixiUtilitySheetView<Host: QixiUtilitySheetHost>: View {
   let sheet: QixiUtilitySheet
   @ObservedObject var host: Host
-  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
@@ -18,30 +17,51 @@ struct QixiUtilitySheetView<Host: QixiUtilitySheetHost>: View {
           SGFImportSheet(host: host)
         case .sync:
           SyncSettingsSheet(host: host)
+        case .exportShare:
+          ExportShareSheet(host: host)
         }
       }
-      .navigationTitle(title)
+      // No Done control — dismiss by swipe/drag. Title is principal + bold (large-title weight
+      // without the large-title vertical layout that misaligned with a trailing button).
+      .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-          Button(L10n.text(.sheetDone)) {
-            dismiss()
-          }
+        ToolbarItem(placement: .principal) {
+          Text(title)
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(QixiColor.ink)
+            .accessibilityAddTraits(.isHeader)
         }
       }
-      .presentationDetents([.medium, .large])
+      // Content-fitting heights so camera/archive never rely on scrolling.
+      // Import stays medium/large (shorter action list).
+      .presentationDetents(presentationDetents)
       .presentationDragIndicator(.visible)
       .background(QixiColor.background)
     }
-    .disabled(host.isBackendInteractionBlocked)
-    .interactiveDismissDisabled(host.isBackendInteractionBlocked)
     .accessibilityIdentifier("qixi-utility-sheet-\(sheet.rawValue)")
   }
 
   private var title: String {
     switch sheet {
     case .camera: return L10n.text(.cameraSheetTitle)
-    case .importGame: return L10n.text(.importSheetTitle)
-    case .sync: return L10n.text(.syncSheetTitle)
+    case .importGame: return L10n.text(.openSheetTitle)
+    case .sync: return L10n.text(.archiveSheetTitle)
+    case .exportShare: return L10n.text(.exportShareSheetTitle)
+    }
+  }
+
+  private var presentationDetents: Set<PresentationDetent> {
+    switch sheet {
+    case .camera:
+      return [.height(360), .large]
+    case .sync:
+      // Compact archive form — no scroll.
+      return [.height(340)]
+    case .exportShare:
+      return [.height(280)]
+    case .importGame:
+      // List needs vertical space; medium/large only (list scrolls, chrome does not).
+      return [.medium, .large]
     }
   }
 }

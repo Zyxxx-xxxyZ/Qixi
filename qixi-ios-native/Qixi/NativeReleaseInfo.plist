@@ -12,13 +12,27 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Qixi MCTS State</string>
+			<string>Go SGF Game</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
-			<string>Owner</string>
+			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
+				<string>com.zyx.qixi.sgf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Qixi Search Archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.png</string>
+				<string>public.image</string>
 				<string>com.zyx.qixi.mcts-state</string>
 			</array>
 		</dict>
@@ -77,10 +91,33 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>com.apple.package</string>
+				<string>public.plain-text</string>
+				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Qixi MCTS State</string>
+			<string>Go SGF Game</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.zyx.qixi.sgf</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sgf</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-go-sgf</string>
+			</dict>
+		</dict>
+		<dict>
+			<!-- Declared only so the open picker can filter; do NOT claim .png system-wide.
+			     User-visible archives are named *.qixi.png so Files treats them as public.png
+			     and shows the board image as the icon (custom UTIs always get a document glyph). -->
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Qixi Search Archive</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.zyx.qixi.mcts-state</string>
 			<key>UTTypeTagSpecification</key>

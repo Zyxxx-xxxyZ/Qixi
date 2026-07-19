@@ -690,8 +690,11 @@ struct AnalysisServiceSmoke {
     expect(QixiAnalysisLimits.normalizedKomi(151.0) == 150.0, "analysis limits clamp high UI komi input")
     expect(QixiAnalysisLimits.normalizedKomi(-151.0) == -150.0, "analysis limits clamp low UI komi input")
     expect(QixiAnalysisLimits.normalizedKomi(.infinity) == QixiAnalysisLimits.defaultKomi, "analysis limits reset non-finite UI komi input")
-    expect(QixiAnalysisLimits.normalizedRootNoise(-0.01) == QixiAnalysisLimits.defaultRootNoise, "analysis limits clamp negative root noise")
-    expect(QixiAnalysisLimits.normalizedRootNoise(.nan) == QixiAnalysisLimits.defaultRootNoise, "analysis limits reset non-finite root noise")
+    expect(QixiAnalysisLimits.normalizedRootNoise(-0.01) == QixiAnalysisLimits.minRootNoise, "analysis limits clamp negative root noise to the floor")
+    expect(QixiAnalysisLimits.normalizedRootNoise(.nan) == QixiAnalysisLimits.defaultRootNoise, "analysis limits reset non-finite root noise to the product default")
+    expect(abs(QixiAnalysisLimits.defaultRootNoise - 0.04) < 1e-12, "first-launch root noise default is 0.04")
+    expect(QixiAnalysisLimits.isValidRootNoise(0.0), "analysis limits still accept zero root noise")
+    expect(QixiAnalysisLimits.isValidRootNoise(0.04), "analysis limits accept the first-launch default root noise")
 
     let validLoadedResponse = AnalysisResponse(
       engine: "katago-metal-mux:b6",

@@ -53,19 +53,28 @@
 		100000000000000000000129 /* b18nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* b18nbt.bin */; };
 		10000000000000000000012A /* b28nbt.bin in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000231 /* b28nbt.bin */; };
 		10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* QixiMemoryTelemetry.swift */; };
+		100000000000000000000168 /* QixiSwitchMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000268 /* QixiSwitchMonitor.swift */; };
+		100000000000000000000169 /* CandidateQualityLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000269 /* CandidateQualityLayout.swift */; };
 		10000000000000000000015E /* QixiMemoryPressurePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025E /* QixiMemoryPressurePolicy.swift */; };
 		100000000000000000000161 /* QixiFeatureHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000261 /* QixiFeatureHosts.swift */; };
+		100000000000000000000170 /* QixiBoardThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000270 /* QixiBoardThumbnail.swift */; };
+		100000000000000000000171 /* CameraRecognitionReviewGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000271 /* CameraRecognitionReviewGallery.swift */; };
 		100000000000000000000162 /* QixiSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000262 /* QixiSyncCoordinator.swift */; };
 		100000000000000000000163 /* QixiImportFileAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000263 /* QixiImportFileAccess.swift */; };
 		100000000000000000000164 /* QixiCameraSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000264 /* QixiCameraSheets.swift */; };
 		100000000000000000000165 /* QixiImportSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000265 /* QixiImportSheets.swift */; };
 		100000000000000000000166 /* QixiSyncSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000266 /* QixiSyncSheets.swift */; };
 		10000000000000000000015F /* QixiAnalysisCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000025F /* QixiAnalysisCache.swift */; };
+100000000000000000000167 /* QixiAnalyzeDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000267 /* QixiAnalyzeDisplay.swift */; };
 		100000000000000000000160 /* QixiPersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000260 /* QixiPersistenceCoordinator.swift */; };
 		10000000000000000000012C /* core_types.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000233 /* core_types.cpp */; };
 		10000000000000000000012D /* board.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000234 /* board.cpp */; };
 		10000000000000000000012E /* mcts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* mcts.cpp */; };
 		10000000000000000000012F /* request_pool.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000236 /* request_pool.cpp */; };
+
+		A10000000000000000000010 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ThumbnailProvider.swift */; };
+		A10000000000000000000011 /* QixiThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* QixiThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10000000000000000000012 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* QuickLookThumbnailing.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -80,12 +89,15 @@
 		10000000000000000000025B /* QixiVariationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiVariationModel.swift; sourceTree = "<group>"; };
 		10000000000000000000025E /* QixiMemoryPressurePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryPressurePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000261 /* QixiFeatureHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiFeatureHosts.swift; sourceTree = "<group>"; };
+		100000000000000000000270 /* QixiBoardThumbnail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiBoardThumbnail.swift; sourceTree = "<group>"; };
+		100000000000000000000271 /* CameraRecognitionReviewGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRecognitionReviewGallery.swift; sourceTree = "<group>"; };
 		100000000000000000000262 /* QixiSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSyncCoordinator.swift; sourceTree = "<group>"; };
 		100000000000000000000263 /* QixiImportFileAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiImportFileAccess.swift; sourceTree = "<group>"; };
 		100000000000000000000264 /* QixiCameraSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiCameraSheets.swift; sourceTree = "<group>"; };
 		100000000000000000000265 /* QixiImportSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiImportSheets.swift; sourceTree = "<group>"; };
 		100000000000000000000266 /* QixiSyncSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSyncSheets.swift; sourceTree = "<group>"; };
 		10000000000000000000025F /* QixiAnalysisCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiAnalysisCache.swift; sourceTree = "<group>"; };
+100000000000000000000267 /* QixiAnalyzeDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiAnalyzeDisplay.swift; sourceTree = "<group>"; };
 		100000000000000000000260 /* QixiPersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiPersistenceCoordinator.swift; sourceTree = "<group>"; };
 		100000000000000000000206 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		100000000000000000000207 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
@@ -131,10 +143,18 @@
 		100000000000000000000230 /* b18nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b18nbt.bin; path = "../../b18nbt.bin"; sourceTree = "<group>"; };
 		100000000000000000000231 /* b28nbt.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = b28nbt.bin; path = "../../b28nbt.bin"; sourceTree = "<group>"; };
 		100000000000000000000232 /* QixiMemoryTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiMemoryTelemetry.swift; sourceTree = "<group>"; };
+		100000000000000000000268 /* QixiSwitchMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QixiSwitchMonitor.swift; sourceTree = "<group>"; };
+		100000000000000000000269 /* CandidateQualityLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateQualityLayout.swift; sourceTree = "<group>"; };
 		100000000000000000000233 /* core_types.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = core_types.cpp; path = "../../core/src/core_types.cpp"; sourceTree = "<group>"; };
 		100000000000000000000234 /* board.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = board.cpp; path = "../../core/src/board.cpp"; sourceTree = "<group>"; };
 		100000000000000000000235 /* mcts.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = mcts.cpp; path = "../../core/src/mcts.cpp"; sourceTree = "<group>"; };
 		100000000000000000000236 /* request_pool.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = request_pool.cpp; path = "../../core/src/request_pool.cpp"; sourceTree = "<group>"; };
+
+		A10000000000000000000001 /* QixiThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = QixiThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000004 /* QixiThumbnail.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QixiThumbnail.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000005 /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/Frameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -150,6 +170,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+		A10000000000000000000022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000012 /* QuickLookThumbnailing.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -157,6 +186,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000402 /* Qixi */,
+				A10000000000000000000030 /* QixiThumbnail */,
 				100000000000000000000405 /* Frameworks */,
 				100000000000000000000403 /* Products */,
 			);
@@ -194,12 +224,15 @@
 				10000000000000000000025B /* QixiVariationModel.swift */,
 				10000000000000000000025E /* QixiMemoryPressurePolicy.swift */,
 				100000000000000000000261 /* QixiFeatureHosts.swift */,
+				100000000000000000000270 /* QixiBoardThumbnail.swift */,
+				100000000000000000000271 /* CameraRecognitionReviewGallery.swift */,
 				100000000000000000000262 /* QixiSyncCoordinator.swift */,
 				100000000000000000000263 /* QixiImportFileAccess.swift */,
 				100000000000000000000264 /* QixiCameraSheets.swift */,
 				100000000000000000000265 /* QixiImportSheets.swift */,
 				100000000000000000000266 /* QixiSyncSheets.swift */,
 				10000000000000000000025F /* QixiAnalysisCache.swift */,
+				100000000000000000000267 /* QixiAnalyzeDisplay.swift */,
 				100000000000000000000260 /* QixiPersistenceCoordinator.swift */,
 				100000000000000000000206 /* RootView.swift */,
 				100000000000000000000207 /* BoardView.swift */,
@@ -210,6 +243,8 @@
 				100000000000000000000213 /* QixiSync.swift */,
 				100000000000000000000228 /* QixiRealDeviceEvidence.swift */,
 				100000000000000000000232 /* QixiMemoryTelemetry.swift */,
+				100000000000000000000268 /* QixiSwitchMonitor.swift */,
+				100000000000000000000269 /* CandidateQualityLayout.swift */,
 				100000000000000000000215 /* QixiUtilitySheets.swift */,
 				100000000000000000000216 /* QixiSGFParser.swift */,
 				100000000000000000000217 /* QixiBoardImageRecognizer.swift */,
@@ -228,6 +263,7 @@
 			isa = PBXGroup;
 			children = (
 				10000000000000000000020B /* Qixi.app */,
+				A10000000000000000000001 /* QixiThumbnail.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -261,8 +297,20 @@
 				10000000000000000000022C /* CoreML.framework */,
 				10000000000000000000022D /* MetalPerformanceShaders.framework */,
 				10000000000000000000022E /* MetalPerformanceShadersGraph.framework */,
+				A10000000000000000000005 /* QuickLookThumbnailing.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+
+		A10000000000000000000030 /* QixiThumbnail */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000002 /* ThumbnailProvider.swift */,
+				A10000000000000000000003 /* Info.plist */,
+				A10000000000000000000004 /* QixiThumbnail.entitlements */,
+			);
+			path = QixiThumbnail;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -285,6 +333,23 @@
 			productReference = 10000000000000000000020B /* Qixi.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A10000000000000000000020 /* QixiThumbnail */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100000000000000000000C1 /* Build configuration list for PBXNativeTarget "QixiThumbnail" */;
+			buildPhases = (
+				A10000000000000000000021 /* Sources */,
+				A10000000000000000000022 /* Frameworks */,
+				A10000000000000000000023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = QixiThumbnail;
+			productName = QixiThumbnail;
+			productReference = A10000000000000000000001 /* QixiThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -296,6 +361,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					100000000000000000000501 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A10000000000000000000020 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -318,6 +386,39 @@
 		};
 /* End PBXProject section */
 
+
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000000025 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000901 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000020;
+			remoteInfo = QixiThumbnail;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000000026 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000020 /* QixiThumbnail */;
+			targetProxy = A10000000000000000000025 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000024 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000011 /* QixiThumbnail.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXResourcesBuildPhase section */
 		100000000000000000000602 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
@@ -331,6 +432,14 @@
 				100000000000000000000128 /* g170-b6c96-s175395328-d26788732.bin.gz in Resources */,
 				100000000000000000000129 /* b18nbt.bin in Resources */,
 				10000000000000000000012A /* b28nbt.bin in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+
+		A10000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -352,12 +461,15 @@
 				10000000000000000000015B /* QixiVariationModel.swift in Sources */,
 				10000000000000000000015E /* QixiMemoryPressurePolicy.swift in Sources */,
 				100000000000000000000161 /* QixiFeatureHosts.swift in Sources */,
+				100000000000000000000170 /* QixiBoardThumbnail.swift in Sources */,
+				100000000000000000000171 /* CameraRecognitionReviewGallery.swift in Sources */,
 				100000000000000000000162 /* QixiSyncCoordinator.swift in Sources */,
 				100000000000000000000163 /* QixiImportFileAccess.swift in Sources */,
 				100000000000000000000164 /* QixiCameraSheets.swift in Sources */,
 				100000000000000000000165 /* QixiImportSheets.swift in Sources */,
 				100000000000000000000166 /* QixiSyncSheets.swift in Sources */,
 				10000000000000000000015F /* QixiAnalysisCache.swift in Sources */,
+				100000000000000000000167 /* QixiAnalyzeDisplay.swift in Sources */,
 				100000000000000000000160 /* QixiPersistenceCoordinator.swift in Sources */,
 				100000000000000000000106 /* RootView.swift in Sources */,
 				100000000000000000000107 /* BoardView.swift in Sources */,
@@ -387,6 +499,17 @@
 				100000000000000000000120 /* QixiNativeModelInstallReceipt.swift in Sources */,
 				100000000000000000000122 /* QixiRealDeviceEvidence.swift in Sources */,
 				10000000000000000000012B /* QixiMemoryTelemetry.swift in Sources */,
+				100000000000000000000168 /* QixiSwitchMonitor.swift in Sources */,
+				100000000000000000000169 /* CandidateQualityLayout.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+
+		A10000000000000000000021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000010 /* ThumbnailProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -571,7 +694,7 @@
 				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Q795QF39Y5;
 				ENABLE_PREVIEWS = YES;
@@ -616,7 +739,7 @@
 				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Q795QF39Y5;
 				ENABLE_PREVIEWS = YES;
@@ -661,7 +784,7 @@
 				CODE_SIGN_ENTITLEMENTS = Qixi/Qixi.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = Q795QF39Y5;
 				ENABLE_PREVIEWS = NO;
@@ -731,6 +854,91 @@
 			};
 			name = NativeRelease;
 		};
+
+		A100000000000000000000B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QixiThumbnail/QixiThumbnail.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QixiThumbnail/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device.thumbnail";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A100000000000000000000B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QixiThumbnail/QixiThumbnail.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QixiThumbnail/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device.thumbnail";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A100000000000000000000B3 /* NativeRelease */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QixiThumbnail/QixiThumbnail.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = Q795QF39Y5;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QixiThumbnail/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zyx.qixi.local-device.thumbnail";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = NativeRelease;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -750,6 +958,17 @@
 				100000000000000000000A01 /* Debug */,
 				100000000000000000000A02 /* Release */,
 				100000000000000000000A03 /* NativeRelease */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+
+		A100000000000000000000C1 /* Build configuration list for PBXNativeTarget "QixiThumbnail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100000000000000000000B1 /* Debug */,
+				A100000000000000000000B2 /* Release */,
+				A100000000000000000000B3 /* NativeRelease */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

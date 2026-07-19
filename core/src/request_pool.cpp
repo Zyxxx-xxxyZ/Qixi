@@ -5,15 +5,40 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+// Model-switch timing: always on so device logs answer "what is slow?"
+// Format: [qixi-switch] phase=... ms=... extra=...
+// Also appends to $TMPDIR/qixi-switch-timing.log when TMPDIR is set (iOS sandbox).
+static void qixiSwitchLog(const char* line) {
+  std::fprintf(stderr, "%s\n", line);
+  if(const char* tmp = std::getenv("TMPDIR")) {
+    std::string path = std::string(tmp) + "qixi-switch-timing.log";
+    if(FILE* f = std::fopen(path.c_str(), "a")) {
+      std::fputs(line, f);
+      std::fputc('\n', f);
+      std::fclose(f);
+    }
+  }
+}
+
+#define QIXI_SWITCH_LOG(fmt, ...) \
+  do { \
+    char _qixi_switch_buf[768]; \
+    std::snprintf(_qixi_switch_buf, sizeof(_qixi_switch_buf), "[qixi-switch] " fmt, ##__VA_ARGS__); \
+    qixiSwitchLog(_qixi_switch_buf); \
+  } while(0)
 
 namespace qixi::core {
 namespace {
@@ -34,6 +59,29 @@ struct StoreBundleEntry {
   std::string filename;
   std::vector<uint8_t> bytes;
 };
+
+/// Persist a (path-only) store off the worker critical path.
+/// Ownership is exclusive to this thread; never touch BackendWorker state from here.
+void persistStoreInBackground(std::unique_ptr<MCTSStore> store, std::string path) {
+  if(!store || path.empty())
+    return;
+  std::thread([store = std::move(store), path = std::move(path)]() mutable {
+    std::string error;
+    // Best-effort only: model switch must not wait on multi-hundred-MB serializes.
+    (void)store->persistToFile(path, &error);
+    store.reset();
+  }).detach();
+}
+
+/// Destroy a huge MCTS tree off the worker critical path.
+/// Freeing millions of nodes on the selectEngine thread was multi-second freezes.
+void destroyStoreInBackground(std::unique_ptr<MCTSStore> store) {
+  if(!store)
+    return;
+  std::thread([store = std::move(store)]() mutable {
+    store.reset();
+  }).detach();
+}
 
 std::string keyString(const AnalysisKey& key) {
   std::ostringstream out;
@@ -521,6 +569,7 @@ RequestId BackendWorker::submit(RequestKind kind, RequestPayload payload, Backen
     }
     else {
       queue.push_back(std::move(pending));
+      fifoPendingCount.store(static_cast<uint32_t>(queue.size()), std::memory_order_release);
     }
   }
   if(full) {
@@ -537,23 +586,42 @@ BackendResult BackendWorker::submitAndWait(
   BackendEpoch expectedEpoch
 ) {
   start();
+  const auto tSubmit = std::chrono::steady_clock::now();
   auto completion = std::make_shared<std::promise<BackendResult>>();
   std::future<BackendResult> future = completion->get_future();
   RequestId requestId = 0;
   bool full = false;
+  size_t queueDepth = 0;
   {
     std::lock_guard<std::mutex> lock(queueMutex);
     PendingRequest pending = makePendingRequest(kind, std::move(payload), expectedEpoch, completion);
     requestId = pending.request.id;
     if(queue.size() >= kRequestQueueMaxDepth)
       full = true;
-    else
+    else {
       queue.push_back(std::move(pending));
+      queueDepth = queue.size();
+      fifoPendingCount.store(static_cast<uint32_t>(queue.size()), std::memory_order_release);
+    }
   }
   if(full)
     return queueFullResult(requestId);
   queueCondition.notify_one();
-  return future.get();
+  BackendResult result = future.get();
+  if(kind == RequestKind::selectEngine) {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - tSubmit
+    ).count();
+    QIXI_SWITCH_LOG(
+      "submitAndWait_selectEngine total_ms=%lld queue_depth_at_submit=%zu",
+      static_cast<long long>(ms),
+      queueDepth
+    );
+    // Append timing to message so Swift diagnostics can surface it.
+    result.message += " | wall_ms=" + std::to_string(ms) +
+      " queue_depth=" + std::to_string(queueDepth);
+  }
+  return result;
 }
 
 BackendResult BackendWorker::executeForTests(RequestKind kind, RequestPayload payload, BackendEpoch expectedEpoch) {
@@ -574,16 +642,26 @@ void BackendWorker::setIoProgress(
   bool active,
   const std::string& phase,
   double fraction,
-  uint64_t bytesDone,
-  uint64_t bytesTotal,
+  uint64_t unitsDone,
+  uint64_t unitsTotal,
   const std::string& message
 ) {
+  // Atomically publish units first (UI lock-free path), then rare string under mutex.
+  ioActive.store(active ? 1 : 0, std::memory_order_release);
+  ioUnitsDone.store(unitsDone, std::memory_order_relaxed);
+  ioUnitsTotal.store(unitsTotal, std::memory_order_relaxed);
+  const uint32_t millis = static_cast<uint32_t>(
+    std::max(0.0, std::min(1.0, fraction)) * 1000.0 + 0.5
+  );
+  ioFractionMillis.store(millis, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lock(ioProgressMutex);
   ioProgress.active = active;
   ioProgress.phase = phase;
   ioProgress.fraction = std::max(0.0, std::min(1.0, fraction));
-  ioProgress.bytesDone = bytesDone;
-  ioProgress.bytesTotal = bytesTotal;
+  ioProgress.unitsDone = unitsDone;
+  ioProgress.unitsTotal = unitsTotal;
+  ioProgress.bytesDone = unitsDone;
+  ioProgress.bytesTotal = unitsTotal;
   ioProgress.message = message;
 }
 
@@ -592,12 +670,183 @@ void BackendWorker::clearIoProgress() {
 }
 
 BackendWorker::IoProgress BackendWorker::currentIoProgress() const {
-  std::lock_guard<std::mutex> lock(ioProgressMutex);
-  return ioProgress;
+  // Prefer atomics so UI never waits on I/O critical section.
+  IoProgress snap;
+  snap.active = ioActive.load(std::memory_order_acquire) != 0;
+  snap.unitsDone = ioUnitsDone.load(std::memory_order_relaxed);
+  snap.unitsTotal = ioUnitsTotal.load(std::memory_order_relaxed);
+  snap.bytesDone = snap.unitsDone;
+  snap.bytesTotal = snap.unitsTotal;
+  snap.fraction = static_cast<double>(ioFractionMillis.load(std::memory_order_relaxed)) / 1000.0;
+  {
+    std::lock_guard<std::mutex> lock(ioProgressMutex);
+    snap.phase = ioProgress.phase;
+    snap.message = ioProgress.message;
+    if(snap.unitsTotal == 0 && ioProgress.unitsTotal > 0) {
+      snap.unitsDone = ioProgress.unitsDone;
+      snap.unitsTotal = ioProgress.unitsTotal;
+      snap.bytesDone = ioProgress.bytesDone;
+      snap.bytesTotal = ioProgress.bytesTotal;
+    }
+  }
+  return snap;
+}
+
+void BackendWorker::publishAnalyzeDisplayLocked() {
+  // Caller owns store mutation (stateMutex or sole worker). Reader never takes locks.
+  AnalyzeDisplayPayload payload{};
+  payload.backendEpoch = ctx.backendEpoch;
+  payload.revision = ctx.revision;
+  // Always publish the live root when the store is resident so Plane B settlement /
+  // UI root gating can observe nav without requiring a ready NN. Analysis numbers
+  // (candidates / ownership / visits) only fill while the engine is ready.
+  if(ctx.store && ctx.storeState == StoreState::ready) {
+    const NodeId liveRoot = ctx.store->currentRoot();
+    payload.root = liveRoot;
+    if(ctx.engineState == EngineState::ready && ctx.evaluator != nullptr) {
+      // Ownership is 361 floats (~1.4KB). Candidates need every publish; ownership can
+      // refresh ~10 Hz. Carry forward previous buffer ownership so the UI heatmap does not flicker.
+      // Always refresh ownership when the root changes so territory is not blank after nav.
+      const uint32_t readIndex = analyzeDisplayIndex.load(std::memory_order_relaxed) & 1u;
+      const AnalyzeDisplayPayload& prev = analyzeDisplayBuffers[readIndex];
+      analyzeOwnershipPublishCounter += 1;
+      const bool rootChanged = !prev.hasOwnership || prev.root != liveRoot;
+      const bool refreshOwnership = rootChanged || (analyzeOwnershipPublishCounter % 12u) == 1u;
+      ctx.store->fillAnalyzeDisplay(payload, kAnalyzeDisplayMaxCandidates, refreshOwnership);
+      payload.root = liveRoot;
+      if(!refreshOwnership && prev.hasOwnership && prev.root == payload.root) {
+        std::memcpy(payload.ownership, prev.ownership, sizeof(payload.ownership));
+        payload.hasOwnership = 1;
+      }
+    }
+  }
+  payload.backendEpoch = ctx.backendEpoch;
+  payload.revision = ctx.revision;
+
+  const uint32_t writeIndex = 1u - analyzeDisplayIndex.load(std::memory_order_relaxed);
+  analyzeDisplaySeq.fetch_add(1, std::memory_order_release); // odd = writing
+  analyzeDisplayBuffers[writeIndex] = payload;
+  analyzeDisplayIndex.store(writeIndex, std::memory_order_release);
+  analyzeDisplayRevision.store(payload.revision, std::memory_order_release);
+  analyzeDisplaySeq.fetch_add(1, std::memory_order_release); // even = stable
+}
+
+uint64_t BackendWorker::publishedAnalyzeRevision() const noexcept {
+  return analyzeDisplayRevision.load(std::memory_order_acquire);
+}
+
+bool BackendWorker::tryLoadAnalyzeDisplay(AnalyzeDisplayPayload& out) const noexcept {
+  for(int attempt = 0; attempt < 4; ++attempt) {
+    const uint64_t seq1 = analyzeDisplaySeq.load(std::memory_order_acquire);
+    if(seq1 & 1ull)
+      continue; // writer in progress
+    const uint32_t index = analyzeDisplayIndex.load(std::memory_order_acquire);
+    out = analyzeDisplayBuffers[index & 1u];
+    const uint64_t seq2 = analyzeDisplaySeq.load(std::memory_order_acquire);
+    if(seq1 == seq2 && (seq2 & 1ull) == 0)
+      return out.revision != 0 || out.root != kInvalidNode || out.candidateCount > 0 ||
+             analyzeDisplayRevision.load(std::memory_order_relaxed) != 0;
+  }
+  return false;
+}
+
+bool BackendWorker::postNavIntent(NavIntent intent) noexcept {
+  if(intent.kind == NavIntentKind::none)
+    return false;
+  // Serialize writers: seqlock is single-writer. Concurrent posts from multiple
+  // Swift Tasks must not tear navIntentSlot.
+  std::lock_guard<std::mutex> writeLock(navIntentWriteMutex);
+  // Seqlock latest-wins: UI never blocks; engine reads a stable copy.
+  navIntentSeq.fetch_add(1, std::memory_order_acq_rel); // odd = writing
+  navIntentSlot = intent;
+  const uint64_t published = navIntentSeq.fetch_add(1, std::memory_order_acq_rel) + 1; // even
+  navIntentPublished.store(published, std::memory_order_release);
+  queueCondition.notify_one();
+  return true;
+}
+
+bool BackendWorker::drainNavIntent() {
+  // Must be called with stateMutex held (or as sole store writer).
+  const uint64_t published = navIntentPublished.load(std::memory_order_acquire);
+  if(published == 0)
+    return false;
+
+  NavIntent intent{};
+  bool got = false;
+  for(int attempt = 0; attempt < 8; ++attempt) {
+    const uint64_t seq1 = navIntentSeq.load(std::memory_order_acquire);
+    if(seq1 & 1ull)
+      continue;
+    intent = navIntentSlot;
+    const uint64_t seq2 = navIntentSeq.load(std::memory_order_acquire);
+    if(seq1 == seq2 && (seq2 & 1ull) == 0) {
+      got = true;
+      break;
+    }
+  }
+  if(!got || intent.kind == NavIntentKind::none)
+    return false;
+
+  // Hard OOM unload leaves store null — rehydrate before dropping the intent.
+  // Previously CAS-cleared first, then returned false and the play was lost forever.
+  if(!ctx.store || ctx.storeState != StoreState::ready) {
+    std::string rehydrateError;
+    (void)tryRehydrateStoreFromDisk(rehydrateError);
+  }
+  if(!ctx.store || ctx.storeState != StoreState::ready) {
+    // Cannot apply: drop the intent so the worker does not busy-spin on a
+    // permanently missing store. UI settlement times out and rolls back.
+    uint64_t expectedPublished = published;
+    (void)navIntentPublished.compare_exchange_strong(
+      expectedPublished, 0ull, std::memory_order_acq_rel, std::memory_order_acquire
+    );
+    return false;
+  }
+
+  // Only clear if this is still the published intent. A newer postNavIntent bumps
+  // published and must not be wiped by a stale drain of the previous slot.
+  uint64_t expectedPublished = published;
+  if(!navIntentPublished.compare_exchange_strong(
+       expectedPublished, 0ull, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+
+  bool applied = false;
+  if(intent.kind == NavIntentKind::play) {
+    PlayMoveCommit commit = ctx.store->playMoveFromRoot(static_cast<Move>(intent.moveOrNode));
+    applied = commit.ok;
+    // Intent map stores lineage hashes (same as FIFO handlePlayMove), never revision.
+    if(applied && intent.uiIntentId != 0 && commit.node < ctx.store->nodeArray().size())
+      ctx.committedIntentMap[intent.uiIntentId] = ctx.store->nodeArray()[commit.node].lineageHash;
+  } else if(intent.kind == NavIntentKind::switchRoot) {
+    std::string error;
+    applied = ctx.store->switchRoot(intent.moveOrNode, &error);
+    // Record switch intents so FIFO play/jump can resolve parentRoot=.intent(...)
+    if(applied && intent.uiIntentId != 0 && ctx.store->currentRoot() < ctx.store->nodeArray().size())
+      ctx.committedIntentMap[intent.uiIntentId] =
+        ctx.store->nodeArray()[ctx.store->currentRoot()].lineageHash;
+  }
+  if(applied) {
+    bumpRevision();
+    publishAnalyzeDisplayLocked();
+  }
+  return applied;
 }
 
 BackendResult BackendWorker::latestSnapshot() const {
-  std::lock_guard<std::mutex> lock(stateMutex);
+  // NEVER block on stateMutex for polls. Free search holds this mutex for entire
+  // playout slices; a blocking lock here starves Swift's analysis actor, which then
+  // cannot run setEngine → selectEngine is never enqueued → free search continues
+  // forever (observed: wall≈36s, core begin only at +35s, engineSelector≈0.3s).
+  std::unique_lock<std::mutex> lock(stateMutex, std::try_to_lock);
+  if(!lock.owns_lock()) {
+    BackendResult busy;
+    busy.ok = true;
+    busy.message = "snapshot busy";
+    // epoch/revision 0 → UI apply path drops this frame without poisoning state.
+    busy.currentRoot = kInvalidNode;
+    return busy;
+  }
   BackendResult result;
   result.requestId = 0;
   result.backendEpoch = ctx.backendEpoch;
@@ -623,7 +872,15 @@ BackendResult BackendWorker::latestLightSnapshot(
   size_t maxVisibleNodes,
   bool includeOwnership
 ) const {
-  std::lock_guard<std::mutex> lock(stateMutex);
+  // try_lock: structure polls must never wait behind free-search playouts.
+  std::unique_lock<std::mutex> lock(stateMutex, std::try_to_lock);
+  if(!lock.owns_lock()) {
+    BackendResult busy;
+    busy.ok = true;
+    busy.message = "snapshot busy";
+    busy.currentRoot = kInvalidNode;
+    return busy;
+  }
   BackendResult result;
   result.requestId = 0;
   result.backendEpoch = ctx.backendEpoch;
@@ -659,8 +916,10 @@ void BackendWorker::runSearchPlayouts(uint32_t count) {
     bool changed = false;
     for(uint32_t i = 0; i < count; ++i)
       changed = ctx.store->runPlayout() || changed;
-    if(changed)
+    if(changed) {
       bumpRevision();
+      publishAnalyzeDisplayLocked();
+    }
   }
 }
 
@@ -724,7 +983,45 @@ Revision BackendWorker::currentRevision() const {
 }
 
 void BackendWorker::workerLoop() {
+  using clock = std::chrono::steady_clock;
+  // Publish HUD at most ~120 Hz. Running one playout + full display fill every
+  // playout was the main reason analyze refresh felt far slower than 120 FPS.
+  constexpr auto kDisplayPublishInterval = std::chrono::microseconds(8333);
+  constexpr uint32_t kMaxPlayoutsPerSlice = 64;
+  // After a move/jump, burst-search the new root so the first HUD frame has real
+  // candidates within ~Lizzie-class latency (target <100 ms including first NN).
+  auto burstSearchAfterNav = [&]() {
+    if(!ctx.store || ctx.storeState != StoreState::ready ||
+       ctx.engineState != EngineState::ready || ctx.evaluator == nullptr)
+      return;
+    publishAnalyzeDisplayLocked(); // new root id immediately (even with 0 visits)
+    const auto burstStart = clock::now();
+    constexpr auto kPostNavBurstBudget = std::chrono::milliseconds(70);
+    uint32_t n = 0;
+    while(n < 8u) {
+      if(navIntentPublished.load(std::memory_order_relaxed) != 0)
+        break;
+      if(clock::now() - burstStart >= kPostNavBurstBudget)
+        break;
+      if(!ctx.store->runPlayout())
+        break;
+      ctx.revision += 1;
+      n += 1;
+      // Publish every playout so the UI can paint the first expanded root ASAP.
+      publishAnalyzeDisplayLocked();
+    }
+  };
+
   while(true) {
+    // Plane B: drain single-slot nav intents before FIFO bulk work / search.
+    {
+      std::lock_guard<std::mutex> stateLock(stateMutex);
+      if(drainNavIntent()) {
+        burstSearchAfterNav();
+        continue;
+      }
+    }
+
     PendingRequest pending;
     bool hasRequest = false;
     {
@@ -734,6 +1031,7 @@ void BackendWorker::workerLoop() {
       if(!queue.empty()) {
         pending = std::move(queue.front());
         queue.pop_front();
+        fifoPendingCount.store(static_cast<uint32_t>(queue.size()), std::memory_order_release);
         runningRequest = pending.request;
         hasRunningRequest = true;
         hasRequest = true;
@@ -743,19 +1041,67 @@ void BackendWorker::workerLoop() {
       bool searched = false;
       {
         std::lock_guard<std::mutex> stateLock(stateMutex);
-        if(ctx.store && ctx.storeState == StoreState::ready &&
-           ctx.engineState == EngineState::ready && ctx.evaluator != nullptr &&
-           ctx.store->runPlayout()) {
-          bumpRevision();
-          searched = true;
+        // Prefer nav over search if something landed while we waited.
+        if(drainNavIntent()) {
+          burstSearchAfterNav();
+          continue;
+        }
+        // Do not start free search when FIFO work is waiting (model switch, etc.).
+        if(fifoPendingCount.load(std::memory_order_acquire) != 0) {
+          // fall through to process queue next iteration
+        } else if(ctx.store && ctx.storeState == StoreState::ready &&
+           ctx.engineState == EngineState::ready && ctx.evaluator != nullptr) {
+          // Run a short search slice, publish display.
+          // Early phase (few root visits): publish every playout so the UI can show
+          // 1, 2, 4… visits immediately — not a 1000+ jump after a blocked first paint.
+          // Steady phase: batch playouts for ~8.3 ms, then publish once (~120 Hz).
+          // Do not take queueMutex here (would risk lock order inversions).
+          const auto sliceStart = clock::now();
+          uint32_t playouts = 0;
+          const NodeId liveRoot = ctx.store->currentRoot();
+          const uint64_t visitsAtSliceStart =
+            (liveRoot < ctx.store->nodeArray().size())
+              ? static_cast<uint64_t>(ctx.store->nodeArray()[liveRoot].visits)
+              : 0ull;
+          // Treat a freshly navigated root as early for longer so post-move paints stay snappy.
+          const bool earlyPhase = visitsAtSliceStart < 128ull;
+          const uint32_t playoutCap = earlyPhase ? 8u : kMaxPlayoutsPerSlice;
+          while(playouts < playoutCap) {
+            if(navIntentPublished.load(std::memory_order_relaxed) != 0)
+              break;
+            // Abort mid-slice so selectEngine is not stuck behind expensive huge-tree playouts.
+            if(fifoPendingCount.load(std::memory_order_relaxed) != 0)
+              break;
+            if(!ctx.store->runPlayout())
+              break;
+            ctx.revision += 1;
+            searched = true;
+            playouts += 1;
+            if(earlyPhase) {
+              // First visits: publish every playout for instant on-screen feedback.
+              publishAnalyzeDisplayLocked();
+            }
+            if(clock::now() - sliceStart >= kDisplayPublishInterval)
+              break;
+          }
+          if(searched && !earlyPhase)
+            publishAnalyzeDisplayLocked();
         }
       }
+      // Always drop stateMutex before looping. After a free-search slice, yield so
+      // try_lock snapshot readers (and thus the Swift analysis actor) are not starved
+      // by a tight re-acquire loop — that starvation blocked setEngine for ~30s+.
+      if(searched)
+        std::this_thread::yield();
       if(!searched) {
         std::unique_lock<std::mutex> lock(queueMutex);
         queueCondition.wait_for(
           lock,
           std::chrono::milliseconds(1),
-          [&]() { return stopping || !queue.empty(); }
+          [&]() {
+            return stopping || !queue.empty() ||
+                   navIntentPublished.load(std::memory_order_acquire) != 0;
+          }
         );
       }
       continue;
@@ -860,12 +1206,8 @@ bool BackendWorker::checkpointCurrentStore(std::string& error) {
   const std::string path = storePath(ctx.currentKey);
   if(path.empty())
     return true;
-  const std::vector<uint8_t> bytes = ctx.store->serialize();
-  if(bytes.empty()) {
-    error = "serialized store exceeds the core-state byte limit";
-    return false;
-  }
-  if(!writeFileAtomically(path, bytes, error))
+  // One-shot: single blob serialize+atomic write (no streaming, no per-node I/O).
+  if(!ctx.store->persistToFile(path, &error))
     return false;
   const std::string filename = std::filesystem::path(path).filename().string();
   const std::vector<uint8_t> index(filename.begin(), filename.end());
@@ -876,9 +1218,8 @@ std::optional<MCTSStore> BackendWorker::loadStore(const AnalysisKey& analysisKey
   const std::string path = storePath(analysisKey);
   if(path.empty() || !std::filesystem::exists(path))
     return std::nullopt;
-  // const method: progress updates go through mutable mutex (setIoProgress is non-const).
-  // Use silent deserializeFromFile for const loads; boot path can call import with progress.
-  auto loaded = MCTSStore::deserializeFromFile(path, kMaxCoreStateBytes, &error);
+  // One-shot rehydrate: whole-file load, no streaming progress.
+  auto loaded = MCTSStore::loadFromFile(path, kMaxCoreStateBytes, &error);
   if(loaded && !(loaded->analysisKey() == analysisKey)) {
     error = "store file analysis key does not match its requested key";
     return std::nullopt;
@@ -904,7 +1245,7 @@ std::optional<MCTSStore> BackendWorker::loadActiveStore(std::string& error) cons
     return std::nullopt;
   }
   const std::string path = (std::filesystem::path(ctx.storeDirectory) / filename).string();
-  return MCTSStore::deserializeFromFile(path, kMaxCoreStateBytes, &error);
+  return MCTSStore::loadFromFile(path, kMaxCoreStateBytes, &error);
 }
 
 bool BackendWorker::prepareTargetStore(
@@ -915,17 +1256,39 @@ bool BackendWorker::prepareTargetStore(
   std::string& error
 ) const {
   error.clear();
+  // Fast model switch:
+  // 1) Reuse on-disk store for this model key as-is (no full visible-tree merge).
+  // 2) Else clone only the current root path (O(ply)), not the entire visible tree.
   auto loaded = loadStore(analysisKey, error);
-  if(!error.empty())
-    return false;
+  // Missing on-disk store is normal for a fresh model/komi/noise key — not fatal.
+  if(!loaded) {
+    error.clear();
+  }
   if(loaded) {
     prepared = std::make_unique<MCTSStore>(std::move(*loaded));
-    if(ctx.store && !prepared->mergeVisibleRecordFrom(*ctx.store, &error))
-      return false;
+    // Align to the live game root when that lineage exists in the loaded tree.
+    // If it does not (moves played under another model), KEEP the full loaded
+    // store — do not replace it with a path clone from the other model, which
+    // would wipe this model's visits/search state.
+    if(ctx.store) {
+      const uint64_t wantLineage = ctx.store->nodeArray().empty()
+        ? 0
+        : (ctx.store->currentRoot() < ctx.store->nodeArray().size()
+             ? ctx.store->nodeArray()[ctx.store->currentRoot()].lineageHash
+             : 0);
+      if(wantLineage != 0) {
+        if(const auto found = prepared->findVisibleNodeByLineage(wantLineage)) {
+          std::string switchError;
+          if(!prepared->switchRoot(*found, &switchError)) {
+            // Keep store; root remains wherever the checkpoint had it.
+          }
+        }
+      }
+    }
     return true;
   }
   if(ctx.store) {
-    MCTSStore clone = ctx.store->cloneVisibleRecord(rules, analysisKey, searchParams, &error);
+    MCTSStore clone = ctx.store->cloneCurrentRootPath(rules, analysisKey, searchParams, &error);
     if(!error.empty())
       return false;
     prepared = std::make_unique<MCTSStore>(std::move(clone));
@@ -970,11 +1333,15 @@ bool BackendWorker::resolveRootRef(const RootRef& reference, NodeId& node, std::
 
 void BackendWorker::bumpRevision() {
   ctx.revision += 1;
+  // Mutations / tests: publish immediately. Continuous search uses revision++ + one
+  // publish per ~8.3ms slice in workerLoop (do not call this per playout there).
+  publishAnalyzeDisplayLocked();
 }
 
 void BackendWorker::bumpEpoch() {
   ctx.backendEpoch += 1;
   ctx.revision += 1;
+  publishAnalyzeDisplayLocked();
 }
 
 BackendResult BackendWorker::executeRequest(const FrontendRequest& request) {
@@ -1055,11 +1422,49 @@ BackendResult BackendWorker::handleImportSGF(const FrontendRequest& request, con
 }
 
 BackendResult BackendWorker::handleSelectEngine(const FrontendRequest& request, const SelectEngineRequest& payload) {
-  std::string checkpointError;
-  if(!checkpointCurrentStore(checkpointError))
-    return baseResult(request, false, checkpointError);
+  // Model switch correctness:
+  //   NEVER rekey another model's visit/Q/policy tree under a new modelId.
+  //   That mixed b6/b18/b28 analysis on the HUD (critical accuracy bug).
+  // Each model owns an isolated store: load its on-disk tree if present, else a
+  // fresh path-clone of the board (O(ply), zero visits). Old store is persisted
+  // and destroyed off the critical path so switch-back keeps per-model analysis.
+  using clock = std::chrono::steady_clock;
+  const auto t0 = clock::now();
+  auto msSince = [&](clock::time_point t) -> long long {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t).count();
+  };
+
+  // After hard OOM unload the store may be null — rehydrate the active game path first.
+  long long rehydrateMs = 0;
+  if(ctx.store == nullptr) {
+    const auto t = clock::now();
+    std::string rehydrateError;
+    if(!tryRehydrateStoreFromDisk(rehydrateError) && !rehydrateError.empty()) {
+      // Continue with empty board only when there is truly no checkpoint.
+    }
+    rehydrateMs = msSince(t);
+  }
+
+  uint64_t nodesBefore = 0;
+  uint64_t actionsBefore = 0;
+  uint64_t memBytesBefore = 0;
+  if(ctx.store) {
+    nodesBefore = ctx.store->nodeArray().size();
+    actionsBefore = ctx.store->actionArray().size();
+    const StoreMemoryStats mem = ctx.store->memoryStats();
+    memBytesBefore = mem.estimatedArenaBytes;
+  }
+  QIXI_SWITCH_LOG(
+    "begin model=%d nodes=%llu actions=%llu store_bytes=%llu rehydrate_ms=%lld",
+    static_cast<int>(payload.modelId),
+    static_cast<unsigned long long>(nodesBefore),
+    static_cast<unsigned long long>(actionsBefore),
+    static_cast<unsigned long long>(memBytesBefore),
+    rehydrateMs
+  );
 
   if(payload.modelId == ModelId::none) {
+    const auto tUnload = clock::now();
     Evaluator* retainedEvaluator = nullptr;
     std::string selectionError;
     ctx.engineState = EngineState::unloading;
@@ -1079,28 +1484,159 @@ BackendResult BackendWorker::handleSelectEngine(const FrontendRequest& request, 
     if(ctx.store)
       ctx.store->setEvaluator(nullptr);
     ctx.engineState = EngineState::none;
+    // Publish a blank analysis plane so the UI cannot keep painting the unloaded model.
+    ctx.revision += 1;
+    publishAnalyzeDisplayLocked();
     bumpEpoch();
     auto result = baseResult(request, true, "engine unloaded; active analysis retained");
     if(ctx.store)
-      result.snapshot = ctx.store->snapshot();
+      result.snapshot = ctx.store->snapshotLight(10, 1, false);
+    QIXI_SWITCH_LOG("to_none engineSelector_ms=%lld total_ms=%lld", msSince(tUnload), msSince(t0));
     return result;
   }
 
   AnalysisKey targetKey = ctx.currentKey;
   targetKey.modelId = payload.modelId;
-  const Rules targetRules = ctx.store ? ctx.store->rules() : Rules{};
-  const bool reuseActiveStore = ctx.store != nullptr && targetKey == ctx.currentKey;
-  std::unique_ptr<MCTSStore> preparedStore;
-  std::string preparationError;
-  if(!reuseActiveStore &&
-     !prepareTargetStore(targetKey, targetRules, ctx.params, preparedStore, preparationError))
-    return baseResult(request, false, "could not prepare model-specific store: " + preparationError);
+  // Same model id already on the live key → keep that model's tree (true reload / no-op path).
+  const bool sameModelStore = ctx.store != nullptr &&
+    ctx.storeState == StoreState::ready &&
+    targetKey == ctx.currentKey;
+
+  // Stop free search from using any NN while we swap stores / load weights.
+  ctx.engineState = EngineState::loading;
+  ctx.revision += 1;
+  if(ctx.store)
+    ctx.store->setEvaluator(nullptr);
+  ctx.evaluator = nullptr;
+  publishAnalyzeDisplayLocked();
+
+  long long prepareMs = 0;
+  // Model isolation: always prepare a target-model store when the live key differs.
+  // This replaces the broken O(1) rekey that painted b28 visits as b18.
+  if(!sameModelStore) {
+    const auto t = clock::now();
+    std::unique_ptr<MCTSStore> preparedStore;
+    std::string preparationError;
+    const Rules targetRules = ctx.store ? ctx.store->rules() : Rules{};
+    const std::string targetKeyStr = keyString(targetKey);
+
+    // 1) Prefer an in-memory parked store for this model (fast switch-back).
+    // IMPORTANT: never discard a parked tree merely because the live lineage is
+    // absent from that model (common after moves under a different engine). The
+    // parked tree still holds that model's search state for jump-back / re-root.
+    if(auto parked = parkedStoresByKey.find(targetKeyStr); parked != parkedStoresByKey.end()) {
+      preparedStore = std::move(parked->second);
+      parkedStoresByKey.erase(parked);
+      // Best-effort align to live game root lineage when that node exists.
+      if(ctx.store && preparedStore) {
+        const uint64_t wantLineage = ctx.store->nodeArray().empty()
+          ? 0
+          : (ctx.store->currentRoot() < ctx.store->nodeArray().size()
+               ? ctx.store->nodeArray()[ctx.store->currentRoot()].lineageHash
+               : 0);
+        if(wantLineage != 0) {
+          if(const auto found = preparedStore->findVisibleNodeByLineage(wantLineage)) {
+            std::string switchError;
+            if(!preparedStore->switchRoot(*found, &switchError)) {
+              // Keep the parked tree at its previous root; do not drop the park.
+              QIXI_SWITCH_LOG(
+                "store_park_root_align_failed model=%d err=%s",
+                static_cast<int>(payload.modelId),
+                switchError.c_str()
+              );
+            }
+          } else {
+            QIXI_SWITCH_LOG(
+              "store_park_lineage_absent model=%d (keeping full parked tree)",
+              static_cast<int>(payload.modelId)
+            );
+          }
+        }
+      }
+      if(preparedStore) {
+        QIXI_SWITCH_LOG("store_park_hit model=%d", static_cast<int>(payload.modelId));
+      }
+    }
+
+    // 2) Disk / path-clone prepare when no usable park.
+    if(!preparedStore) {
+      if(!prepareTargetStore(targetKey, targetRules, ctx.params, preparedStore, preparationError))
+        return baseResult(request, false, "could not prepare model-specific store: " + preparationError);
+    }
+    if(!preparedStore)
+      return baseResult(request, false, "engine selection committed without a store");
+
+    // Hand off the outgoing model's tree into the park (and async disk).
+    auto outgoing = std::move(ctx.store);
+    const AnalysisKey outgoingKey = ctx.currentKey;
+    ctx.store = std::move(preparedStore);
+    ctx.currentKey = targetKey;
+    ctx.params = ctx.store->searchParams();
+    ctx.storeState = StoreState::ready;
+    ctx.store->setEvaluator(nullptr);
+    // New store has renumbered NodeIds — clear intent map (ui intents are session-local).
+    ctx.committedIntentMap.clear();
+
+    if(outgoing && outgoingKey.modelId != ModelId::none) {
+      outgoing->setEvaluator(nullptr);
+      const std::string outKeyStr = keyString(outgoingKey);
+      // Evict any older park for the same key (keep only the freshest).
+      if(auto oldPark = parkedStoresByKey.find(outKeyStr); oldPark != parkedStoresByKey.end()) {
+        destroyStoreInBackground(std::move(oldPark->second));
+        parkedStoresByKey.erase(oldPark);
+      }
+      // Cap park size: product has ≤3 engines; never retain a fourth tree.
+      while(parkedStoresByKey.size() >= 3) {
+        auto it = parkedStoresByKey.begin();
+        destroyStoreInBackground(std::move(it->second));
+        parkedStoresByKey.erase(it);
+      }
+      // Keep the outgoing model's tree in RAM for correct switch-back, and always
+      // attempt a durable disk image so cold rehydrate / park-miss can recover visits.
+      // Without this write, only a stale pre-search checkpoint (or nothing) remains
+      // on disk and switch-back after park eviction loses the entire tree.
+      if(!ctx.storeDirectory.empty()) {
+        const std::string path = storePath(outgoingKey);
+        if(!path.empty()) {
+          std::string persistError;
+          if(!outgoing->persistToFile(path, &persistError)) {
+            QIXI_SWITCH_LOG(
+              "store_park_persist_failed model=%d err=%s",
+              static_cast<int>(outgoingKey.modelId),
+              persistError.c_str()
+            );
+          } else {
+            // Keep active-store.index pointing at the live model after switch; the
+            // parked file is still loadable via storePath(outgoingKey).
+            QIXI_SWITCH_LOG(
+              "store_park_persisted model=%d path=%s",
+              static_cast<int>(outgoingKey.modelId),
+              path.c_str()
+            );
+          }
+        }
+      }
+      parkedStoresByKey[outKeyStr] = std::move(outgoing);
+    } else if(outgoing) {
+      destroyStoreInBackground(std::move(outgoing));
+    }
+    prepareMs = msSince(t);
+    QIXI_SWITCH_LOG(
+      "store_isolated model=%d prepare_ms=%lld parked=%zu",
+      static_cast<int>(payload.modelId),
+      prepareMs,
+      parkedStoresByKey.size()
+    );
+  }
 
   Evaluator* selectedEvaluator = nullptr;
   std::string selectionError;
+  long long engineSelectorMs = 0;
   if(engineSelector) {
-    ctx.engineState = EngineState::loading;
+    const auto t = clock::now();
     if(!engineSelector(payload.modelId, selectedEvaluator, selectionError)) {
+      engineSelectorMs = msSince(t);
+      QIXI_SWITCH_LOG("engineSelector FAILED ms=%lld err=%s", engineSelectorMs, selectionError.c_str());
       ctx.evaluator = selectedEvaluator;
       if(ctx.store)
         ctx.store->setEvaluator(selectedEvaluator);
@@ -1112,6 +1648,7 @@ BackendResult BackendWorker::handleSelectEngine(const FrontendRequest& request, 
         selectionError.empty() ? "engine selection failed" : selectionError
       );
     }
+    engineSelectorMs = msSince(t);
   }
   else {
     selectedEvaluator = ctx.evaluator;
@@ -1122,17 +1659,60 @@ BackendResult BackendWorker::handleSelectEngine(const FrontendRequest& request, 
     return baseResult(request, false, "selected engine did not provide an evaluator");
   }
 
-  if(!reuseActiveStore)
-    ctx.store = std::move(preparedStore);
+  if(!ctx.store) {
+    ctx.engineState = EngineState::offline;
+    bumpEpoch();
+    return baseResult(request, false, "engine selection committed without a store");
+  }
+
+  const auto tAttach = clock::now();
+  // Store already carries targetKey.modelId from prepareTargetStore / sameModel path.
+  // Do not rekey a foreign tree.
   ctx.currentKey = targetKey;
+  if(ctx.store->analysisKey().modelId != payload.modelId)
+    ctx.store->rekeyModelId(payload.modelId);
   ctx.params = ctx.store->searchParams();
   ctx.evaluator = selectedEvaluator;
   ctx.engineState = EngineState::ready;
   ctx.store->setEvaluator(selectedEvaluator);
   ctx.storeState = StoreState::ready;
   bumpEpoch();
+  const long long rekeyMs = msSince(tAttach);
+
+  // Fresh plane for this model only (path clone starts at 0 visits).
+  publishAnalyzeDisplayLocked();
+  const long long playoutMs = 0;
+
+  const auto tSnap = clock::now();
   auto result = baseResult(request, true, "engine selection committed");
-  result.snapshot = ctx.store->snapshot();
+  result.snapshot = ctx.store->snapshotLight(10, 1, false);
+  const long long snapMs = msSince(tSnap);
+  const long long totalMs = msSince(t0);
+
+  QIXI_SWITCH_LOG(
+    "done model=%d nodes=%llu store_bytes=%llu prepare_ms=%lld engineSelector_ms=%lld "
+    "rekey_ms=%lld playout_ms=%lld snapshot_ms=%lld total_ms=%lld isolated=%d",
+    static_cast<int>(payload.modelId),
+    static_cast<unsigned long long>(nodesBefore),
+    static_cast<unsigned long long>(memBytesBefore),
+    prepareMs,
+    engineSelectorMs,
+    rekeyMs,
+    playoutMs,
+    snapMs,
+    totalMs,
+    sameModelStore ? 0 : 1
+  );
+  result.message +=
+    " | nodes=" + std::to_string(nodesBefore) +
+    " store_MB=" + std::to_string(memBytesBefore / (1024ull * 1024ull)) +
+    " prepare_ms=" + std::to_string(prepareMs) +
+    " engineSelector_ms=" + std::to_string(engineSelectorMs) +
+    " rekey_ms=" + std::to_string(rekeyMs) +
+    " playout_ms=" + std::to_string(playoutMs) +
+    " snapshot_ms=" + std::to_string(snapMs) +
+    " isolated=" + std::to_string(sameModelStore ? 0 : 1) +
+    " handle_ms=" + std::to_string(totalMs);
   return result;
 }
 
@@ -1140,97 +1720,29 @@ BackendResult BackendWorker::handleExportAnalysisState(const FrontendRequest& re
   auto result = baseResult(request, true, "analysis state exported");
   if(!ensureStoreReady(result))
     return result;
-  setIoProgress(true, "checkpointing", 0.05, 0, 0, "Saving active store");
+  // Export ONLY the live store. Older multi-engine on-disk stores for the same game
+  // can each be 100–250+ MB; bundling all of them made user-facing packages huge
+  // after only a few analyzes on the current engine.
+  // I/O: persistToFile streams with fopen("wb") + fwrite of the in-memory arenas
+  // (no full intermediate vector, no re-read/re-serialize of every store file).
   std::string error;
-  if(!checkpointCurrentStore(error)) {
-    clearIoProgress();
+  if(!checkpointCurrentStore(error))
     return baseResult(request, false, error);
-  }
-
-  std::vector<uint8_t> bytes;
-  if(ctx.storeDirectory.empty()) {
-    setIoProgress(true, "serializing", 0.25, 0, 0, "Serializing MCTS store");
-    bytes = ctx.store->serialize();
-    if(bytes.empty()) {
-      clearIoProgress();
-      return baseResult(request, false, "serialized store exceeds the core-state byte limit");
-    }
-    setIoProgress(true, "serializing", 0.55, bytes.size(), bytes.size(), "Serialized MCTS store");
-  }
-  else {
-    setIoProgress(true, "bundling", 0.20, 0, 0, "Collecting store bundle");
-    const std::string activeFilename = std::filesystem::path(storePath(ctx.currentKey)).filename().string();
-    std::vector<StoreBundleEntry> entries;
-    std::error_code iteratorError;
-    for(std::filesystem::directory_iterator iterator(ctx.storeDirectory, iteratorError), end;
-        !iteratorError && iterator != end;
-        iterator.increment(iteratorError)) {
-      const std::filesystem::directory_entry& item = *iterator;
-      const std::string filename = item.path().filename().string();
-      if(item.path().extension() != ".qixi-core-store")
-        continue;
-      const auto status = item.symlink_status(iteratorError);
-      if(iteratorError || !std::filesystem::is_regular_file(status)) {
-        error = "core store directory contains a non-regular store entry";
-        break;
-      }
-      StoreBundleEntry entry;
-      entry.filename = filename;
-      if(!readFile(item.path().string(), entry.bytes, error))
-        break;
-      std::string decodeError;
-      auto decoded = MCTSStore::deserialize(entry.bytes, &decodeError);
-      if(!decoded) {
-        error = "could not validate store while exporting bundle: " + decodeError;
-        break;
-      }
-      if(decoded->analysisKey().gameId != ctx.currentKey.gameId)
-        continue;
-      if(std::filesystem::path(storePath(decoded->analysisKey())).filename().string() != filename) {
-        error = "core store filename does not match its embedded analysis key";
-        break;
-      }
-      entries.push_back(std::move(entry));
-    }
-    if(iteratorError && error.empty())
-      error = "could not enumerate core store directory";
-    if(!error.empty()) {
-      clearIoProgress();
-      return baseResult(request, false, error);
-    }
-    std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-      return a.filename < b.filename;
-    });
-    if(!buildStoreBundle(activeFilename, entries, bytes, error)) {
-      clearIoProgress();
-      return baseResult(request, false, error);
-    }
-    setIoProgress(true, "bundling", 0.55, bytes.size(), bytes.size(), "Bundle ready");
-  }
-  setIoProgress(true, "writing", 0.75, 0, bytes.size(), "Writing package");
-  if(!writeFileAtomically(payload.path, bytes, error)) {
-    clearIoProgress();
+  if(!ctx.store->persistToFile(payload.path, &error))
     return baseResult(request, false, error);
-  }
-  setIoProgress(true, "complete", 1.0, bytes.size(), bytes.size(), "Export complete");
-  clearIoProgress();
   return result;
 }
 
 BackendResult BackendWorker::handleEnterBackground(const FrontendRequest& request, const EnterBackgroundRequest& payload) {
+  // Product policy: no background action. Regular MCTS backup is periodic autosave / OOM only.
   (void)payload;
-  std::string error;
-  if(!checkpointCurrentStore(error))
-    return baseResult(request, false, error);
-  return baseResult(request, true, "background checkpoint saved committed state");
+  return baseResult(request, true, "enterBackground ignored (no lifecycle checkpoint)");
 }
 
 BackendResult BackendWorker::handleEnterForeground(const FrontendRequest& request, const EnterForegroundRequest& payload) {
+  // Product policy: no foreground restore of previous session state.
   (void)payload;
-  auto result = baseResult(request, true, "foreground restored");
-  if(ctx.store)
-    result.snapshot = ctx.store->snapshot();
-  return result;
+  return baseResult(request, true, "enterForeground ignored (no lifecycle restore)");
 }
 
 BackendResult BackendWorker::handleAutosaveTick(const FrontendRequest& request, const AutosaveTickRequest& payload) {
@@ -1254,8 +1766,8 @@ BackendResult BackendWorker::handleSetKomi(const FrontendRequest& request, const
   if(oldKey == newKey)
     return baseResult(request, true, "komi unchanged");
   std::string checkpointError;
-  if(!checkpointCurrentStore(checkpointError))
-    return baseResult(request, false, checkpointError);
+  // Best-effort: do not refuse a komi change because a disk checkpoint failed.
+  (void)checkpointCurrentStore(checkpointError);
   rules.komi = payload.komi;
   AnalysisKey targetKey = ctx.currentKey;
   targetKey.rulesHash = hashRules(rules);
@@ -1285,8 +1797,8 @@ BackendResult BackendWorker::handleSetWideRootNoise(const FrontendRequest& reque
   if(ctx.currentKey.wideRootNoiseKey == newKey)
     return baseResult(request, true, "wide root noise unchanged");
   std::string checkpointError;
-  if(!checkpointCurrentStore(checkpointError))
-    return baseResult(request, false, checkpointError);
+  // Best-effort: do not refuse a root-noise change because a disk checkpoint failed.
+  (void)checkpointCurrentStore(checkpointError);
   SearchParams targetParams = ctx.params;
   targetParams.rootNoise = payload.noise;
   AnalysisKey targetKey = ctx.currentKey;
@@ -1312,9 +1824,10 @@ BackendResult BackendWorker::handleNewGame(const FrontendRequest& request, const
      payload.rules.komi > kMaximumSupportedKomi ||
      (payload.nextPla != Color::black && payload.nextPla != Color::white))
     return baseResult(request, false, "new game rules or next player are invalid");
+  // Best-effort only: refusing New on a failed checkpoint left the UI wiped while core
+  // still held the old tree, so structure polls resurrected previous variations.
   std::string checkpointError;
-  if(!checkpointCurrentStore(checkpointError))
-    return baseResult(request, false, checkpointError);
+  (void)checkpointCurrentStore(checkpointError);
   const GameId gameId = ctx.nextGameId++;
   ctx.currentKey = makeKey(gameId, ctx.currentKey.modelId, payload.rules, ctx.currentKey.wideRootNoiseKey);
   BoardState board = BoardLogic::emptyBoard(payload.nextPla);
@@ -1344,12 +1857,16 @@ BackendResult BackendWorker::handlePlayMove(const FrontendRequest& request, cons
   PlayMoveCommit commit = ctx.store->playMoveFromRoot(payload.move);
   if(!commit.ok)
     return baseResult(request, false, "defensive legality rejection: " + commit.error);
-  ctx.committedIntentMap[payload.uiIntentId] = ctx.store->nodeArray()[commit.node].lineageHash;
+  // Never pollute the intent map with key 0 (sentinel / "no intent").
+  if(payload.uiIntentId != 0)
+    ctx.committedIntentMap[payload.uiIntentId] = ctx.store->nodeArray()[commit.node].lineageHash;
   bumpRevision();
+  publishAnalyzeDisplayLocked();
   result = baseResult(request, true, "move committed");
   result.committedUiIntentId = payload.uiIntentId;
   result.hasCommittedUiIntent = payload.uiIntentId != 0;
-  result.snapshot = ctx.store->snapshot();
+  // Light snapshot only — full visible-tree snapshot freezes the worker for seconds.
+  result.snapshot = ctx.store->snapshotLight(10, 512, true);
   return result;
 }
 
@@ -1366,12 +1883,38 @@ BackendResult BackendWorker::handleStep(const FrontendRequest& request, const St
       target = nodes[target].parent;
     }
     else {
+      // Prefer highest-visit action child (PV). Fall back to any child node of
+      // target (played moves create children even when actions were missing).
       NodeId child = kInvalidNode;
-      const RootSnapshot snapshot = ctx.store->snapshot();
-      for(const TreeNodeSnapshot& candidate : snapshot.visibleTree) {
-        if(candidate.parent == target) {
-          child = candidate.id;
-          break;
+      VisitCount bestVisits = 0;
+      if(target < nodes.size()) {
+        ActionId actionId = nodes[target].firstAction;
+        uint32_t traversed = 0;
+        const auto& actions = ctx.store->actionArray();
+        while(actionId != kInvalidAction && traversed < nodes[target].actionCount) {
+          if(actionId >= actions.size())
+            break;
+          const Action& action = actions[actionId];
+          if(action.child != kInvalidNode &&
+             (child == kInvalidNode || action.visits > bestVisits ||
+              (action.visits == bestVisits && action.child < child))) {
+            child = action.child;
+            bestVisits = action.visits;
+          }
+          actionId = action.nextAction;
+          traversed += 1;
+        }
+        if(child == kInvalidNode) {
+          for(NodeId id = 0; id < nodes.size(); ++id) {
+            if(nodes[id].parent != target)
+              continue;
+            const VisitCount visits = nodes[id].visits;
+            if(child == kInvalidNode || visits > bestVisits ||
+               (visits == bestVisits && id < child)) {
+              child = id;
+              bestVisits = visits;
+            }
+          }
         }
       }
       if(child == kInvalidNode)
@@ -1383,8 +1926,11 @@ BackendResult BackendWorker::handleStep(const FrontendRequest& request, const St
   if(!ctx.store->switchRoot(target, &error))
     return baseResult(request, false, error);
   bumpRevision();
+  // Publish HUD immediately so UI can settle without waiting for JSON snapshot.
+  publishAnalyzeDisplayLocked();
   result = baseResult(request, true, "root changed");
-  result.snapshot = ctx.store->snapshot();
+  // Cap tree nodes — full snapshot() walks every visible node + parent actions.
+  result.snapshot = ctx.store->snapshotLight(10, 512, true);
   return result;
 }
 
@@ -1399,8 +1945,9 @@ BackendResult BackendWorker::handleJumpToNode(const FrontendRequest& request, co
   if(!ctx.store->switchRoot(target, &error))
     return baseResult(request, false, error);
   bumpRevision();
+  publishAnalyzeDisplayLocked();
   result = baseResult(request, true, "root changed");
-  result.snapshot = ctx.store->snapshot();
+  result.snapshot = ctx.store->snapshotLight(10, 512, true);
   return result;
 }
 
@@ -1413,122 +1960,102 @@ BackendResult BackendWorker::handleSetTerritoryMode(const FrontendRequest& reque
 }
 
 BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& request, const ImportAnalysisStateRequest& payload) {
-  setIoProgress(true, "reading", 0.02, 0, 0, "Reading MCTS state");
+  // One-shot import: whole-file read(s) + at most one rekey serialize per store blob.
+  // No streaming progress and no double-pass per-entry transcription.
   std::string error;
-  auto progressCb = [this](const MCTSStore::DeserializeProgress& p) {
-    setIoProgress(true, p.phase, p.fraction, p.unitsDone, p.unitsTotal, p.message);
-  };
 
-  // Peek magic with a small prefix read to choose bundle vs single-store path.
   std::vector<uint8_t> magicBytes;
-  if(!peekFilePrefix(payload.path, 16, magicBytes, error)) {
-    clearIoProgress();
+  if(!peekFilePrefix(payload.path, 16, magicBytes, error))
     return baseResult(request, false, error);
-  }
 
   std::optional<MCTSStore> loaded;
   std::vector<StoreBundleEntry> bundleEntries;
   std::string activeFilename;
-  const GameId importedGameId = ctx.nextGameId;
+  GameId importedGameId = ctx.nextGameId;
   std::vector<uint8_t> bytes;
   if(hasStoreBundleMagic(magicBytes)) {
-    if(!readFile(payload.path, bytes, error)) {
-      clearIoProgress();
+    if(!readFile(payload.path, bytes, error))
       return baseResult(request, false, error);
-    }
-    setIoProgress(true, "parsing", 0.25, bytes.size(), bytes.size(), "Parsing store bundle");
-    if(!parseStoreBundle(bytes, activeFilename, bundleEntries, error)) {
-      clearIoProgress();
+    if(!parseStoreBundle(bytes, activeFilename, bundleEntries, error))
       return baseResult(request, false, error);
-    }
-    if(ctx.storeDirectory.empty()) {
-      clearIoProgress();
+    if(ctx.storeDirectory.empty())
       return baseResult(request, false, "cannot import a multi-store bundle without a store directory");
-    }
     std::vector<uint8_t>().swap(bytes);
 
     std::set<std::string> analysisKeys;
     GameId bundleGameId = 0;
-    for(StoreBundleEntry& entry : bundleEntries) {
-      std::string decodeError;
-      auto decoded = MCTSStore::deserialize(entry.bytes, &decodeError);
-      if(!decoded) {
-        clearIoProgress();
-        return baseResult(request, false, "bundle store is invalid: " + decodeError);
-      }
-      const std::string canonical = std::filesystem::path(storePath(decoded->analysisKey())).filename().string();
-      if(canonical != entry.filename) {
-        clearIoProgress();
-        return baseResult(request, false, "bundle store filename does not match its analysis key");
-      }
-      if(bundleGameId == 0)
-        bundleGameId = decoded->analysisKey().gameId;
-      else if(decoded->analysisKey().gameId != bundleGameId) {
-        clearIoProgress();
-        return baseResult(request, false, "bundle contains stores from multiple games");
-      }
-      if(!analysisKeys.insert(keyString(decoded->analysisKey())).second) {
-        clearIoProgress();
-        return baseResult(request, false, "bundle contains duplicate analysis keys");
-      }
-    }
-
     std::string importedActiveFilename;
     for(StoreBundleEntry& entry : bundleEntries) {
       const bool isActive = entry.filename == activeFilename;
       std::string decodeError;
+      // Single deserialize of the whole entry blob (not node-by-node file I/O).
       auto decoded = MCTSStore::deserialize(entry.bytes, &decodeError);
-      if(!decoded) {
-        clearIoProgress();
-        return baseResult(request, false, "bundle store changed during validation: " + decodeError);
-      }
+      if(!decoded)
+        return baseResult(request, false, "bundle store is invalid: " + decodeError);
+      const std::string canonical = std::filesystem::path(storePath(decoded->analysisKey())).filename().string();
+      if(canonical != entry.filename)
+        return baseResult(request, false, "bundle store filename does not match its analysis key");
+      if(bundleGameId == 0)
+        bundleGameId = decoded->analysisKey().gameId;
+      else if(decoded->analysisKey().gameId != bundleGameId)
+        return baseResult(request, false, "bundle contains stores from multiple games");
+      if(!analysisKeys.insert(keyString(decoded->analysisKey())).second)
+        return baseResult(request, false, "bundle contains duplicate analysis keys");
+
       std::vector<uint8_t>().swap(entry.bytes);
       decoded->assignImportedGameId(importedGameId);
       entry.filename =
         std::filesystem::path(storePath(decoded->analysisKey())).filename().string();
+      // One rekey serialize of the whole blob, then install with one write.
       entry.bytes = decoded->serialize();
-      if(entry.bytes.empty()) {
-        clearIoProgress();
+      if(entry.bytes.empty())
         return baseResult(request, false, "imported bundle store exceeds the core-state byte limit");
-      }
       if(isActive) {
         importedActiveFilename = entry.filename;
         loaded = std::move(decoded);
       }
     }
     activeFilename = importedActiveFilename;
-    if(!loaded) {
-      clearIoProgress();
+    if(!loaded)
       return baseResult(request, false, "bundle active store could not be decoded");
-    }
   }
   else {
-    // Single-store product path: mmap/chunked load with true parse progress.
-    loaded = MCTSStore::deserializeFromFile(payload.path, kMaxCoreStateBytes, &error, progressCb);
-    if(!loaded) {
-      clearIoProgress();
-      return baseResult(request, false, error);
+    // Single-store: one-shot whole-file load (core-state.bin from a .qixi-mcts package).
+    loaded = MCTSStore::loadFromFile(payload.path, kMaxCoreStateBytes, &error);
+    if(!loaded)
+      return baseResult(request, false, error.empty() ? "could not load core-state.bin" : error);
+    // Pick a free game id so reopened archives never collide with on-disk CoreStores.
+    if(!ctx.storeDirectory.empty()) {
+      for(int attempt = 0; attempt < 10000; ++attempt) {
+        loaded->assignImportedGameId(importedGameId);
+        const std::string candidate = storePath(loaded->analysisKey());
+        if(candidate.empty() || !std::filesystem::exists(candidate))
+          break;
+        importedGameId += 1;
+      }
+    } else {
+      loaded->assignImportedGameId(importedGameId);
     }
-    loaded->assignImportedGameId(importedGameId);
-    setIoProgress(true, "serializing", 0.92, 0, 0, "Re-serializing imported store");
+    // One rekey serialize of the whole store blob (required because game id changes).
     bytes = loaded->serialize();
-    if(bytes.empty()) {
-      clearIoProgress();
+    if(bytes.empty())
       return baseResult(request, false, "imported store exceeds the core-state byte limit");
-    }
   }
 
-  if(ctx.engineState == EngineState::ready &&
-     loaded->analysisKey().modelId != ctx.currentKey.modelId) {
-    clearIoProgress();
-    return baseResult(request, false, "imported active state belongs to a different loaded model");
-  }
+  // Import *replaces* the live analysis store. The package may come from a different
+  // model than the currently selected engine (open .qixi-mcts after analyzing on another
+  // model is the common case). Swift re-selects the package engine after import.
+  // Detach any live evaluator so free search cannot race the store swap.
+  if(ctx.store)
+    ctx.store->setEvaluator(nullptr);
+  if(ctx.engineState == EngineState::ready || ctx.engineState == EngineState::loading)
+    ctx.engineState = EngineState::offline;
 
   std::vector<std::string> bundleDestinations;
   std::string singleDestination;
   if(!bundleEntries.empty()) {
     bundleDestinations.reserve(bundleEntries.size());
-    for(const StoreBundleEntry& entry : bundleEntries) {
+    for(StoreBundleEntry& entry : bundleEntries) {
       const std::string destination =
         (std::filesystem::path(ctx.storeDirectory) / entry.filename).string();
       if(std::filesystem::exists(destination))
@@ -1543,7 +2070,7 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
   }
 
   if(!checkpointCurrentStore(error))
-    return baseResult(request, false, error);
+    return baseResult(request, false, error.empty() ? "checkpoint before import failed" : error);
 
   if(!bundleEntries.empty()) {
     std::vector<std::string> installedPaths;
@@ -1582,7 +2109,6 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
     }
     std::vector<uint8_t>().swap(bytes);
   }
-  setIoProgress(true, "activating", 0.85, 0, 0, "Activating imported store");
   ctx.store = std::make_unique<MCTSStore>(std::move(*loaded));
   ctx.currentKey = ctx.store->analysisKey();
   ctx.params = ctx.store->searchParams();
@@ -1592,9 +2118,7 @@ BackendResult BackendWorker::handleImportAnalysisState(const FrontendRequest& re
   ctx.storeState = StoreState::ready;
   bumpEpoch();
   auto result = baseResult(request, true, "analysis state imported");
-  result.snapshot = ctx.store->snapshotLight(32, 4096, true);
-  setIoProgress(true, "complete", 1.0, 0, 0, "Import complete");
-  clearIoProgress();
+  result.snapshot = ctx.store->snapshotLight(10, 4096, true);
   return result;
 }
 
@@ -1615,6 +2139,7 @@ BackendResult BackendWorker::handleApplyRecognizedBoard(const FrontendRequest& r
   BoardState board = payload.board;
   board.nextPla = payload.sideToMove;
   board.moves.clear();
+  board.simpleKoPoint = -1;
   board.boardHashHistory.clear();
   board.boardHashHistory.push_back(BoardLogic::boardHash(board));
   board.situationHashHistory.clear();
@@ -1644,20 +2169,16 @@ BackendResult BackendWorker::handleRelieveMemoryPressure(
   const FrontendRequest& request,
   const RelieveMemoryPressureRequest& payload
 ) {
-  // Soft (0): durable checkpoint only; keep the live store. Hard (1): checkpoint then
-  // drop the live store from RAM. Product Swift owns NN unload ordering.
+  // Soft (0): one-shot durable checkpoint; keep the live store.
+  // Hard (1): one-shot checkpoint write, then drop the live store from RAM.
+  // No streaming progress. Product Swift owns NN unload ordering.
   if(payload.level == 0) {
-    setIoProgress(true, "checkpointing", 0.2, 0, 0, "Checkpointing store under memory pressure");
     std::string error;
-    if(!checkpointCurrentStore(error)) {
-      clearIoProgress();
+    if(!checkpointCurrentStore(error))
       return baseResult(request, false, error.empty() ? "soft memory checkpoint failed" : error);
-    }
-    setIoProgress(true, "complete", 1.0, 0, 0, "Soft memory checkpoint complete");
-    clearIoProgress();
     auto result = baseResult(request, true, "memory pressure soft: store checkpointed");
     if(ctx.store)
-      result.snapshot = ctx.store->snapshotLight(32, 4096, true);
+      result.snapshot = ctx.store->snapshotLight(10, 4096, true);
     return result;
   }
 
@@ -1677,10 +2198,9 @@ BackendResult BackendWorker::handleRelieveMemoryPressure(
   }
 
   const StoreMemoryStats before = ctx.store->memoryStats();
-  setIoProgress(true, "checkpointing", 0.15, 0, before.estimatedArenaBytes, "Saving analysis before unload");
   std::string error;
+  // Direct one-time disk write of the whole store blob, then free RAM.
   if(!checkpointCurrentStore(error)) {
-    clearIoProgress();
     return baseResult(
       request,
       false,
@@ -1688,13 +2208,10 @@ BackendResult BackendWorker::handleRelieveMemoryPressure(
     );
   }
 
-  setIoProgress(true, "unloading", 0.85, before.estimatedArenaBytes, before.estimatedArenaBytes, "Dropping live MCTS store");
   ctx.store.reset();
   ctx.storeState = StoreState::empty;
-  // Keep currentKey / intent map / engine identity; mutations rehydrate from disk.
+  // Keep currentKey / intent map / engine identity; mutations rehydrate via one-shot loadFromFile.
   bumpRevision();
-  setIoProgress(true, "complete", 1.0, before.estimatedArenaBytes, before.estimatedArenaBytes, "Store unloaded from RAM");
-  clearIoProgress();
 
   std::ostringstream message;
   message << "memory pressure hard: store unloaded nodes=" << before.nodeCount

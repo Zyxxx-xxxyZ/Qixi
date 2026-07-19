@@ -104,6 +104,15 @@ public:
   virtual bool testNnPolicyOnlySelectionEnabled() const {
     return false;
   }
+
+  // TEST-ONLY: serialize analysis state to a byte blob, drop the live store from
+  // memory, then restore from the blob (unload/reload). Used to stress
+  // persistent-MCTS export/import during oracle sequences. Default fails closed.
+  virtual bool memoryUnloadAndReload(std::string* error) {
+    if(error)
+      *error = "memoryUnloadAndReload is not supported by this engine";
+    return false;
+  }
 };
 
 // Factory for the modified/custom persistent MCTS backend.

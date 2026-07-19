@@ -87,6 +87,12 @@ add_executable(qixi_stream_deserialize
 
 target_link_libraries(qixi_stream_deserialize PRIVATE qixi_core)
 
+add_executable(qixi_store_persist_strict
+  tests/qixi_store_persist_strict.cpp
+)
+
+target_link_libraries(qixi_store_persist_strict PRIVATE qixi_core)
+
 add_executable(qixi_memory_pressure_relief
   tests/qixi_memory_pressure_relief.cpp
 )
@@ -104,4 +110,5 @@ add_test(NAME qixi_split_backup COMMAND qixi_split_backup)
 add_test(NAME qixi_policy_only_selection COMMAND qixi_policy_only_selection)
 add_test(NAME qixi_policy_only_selection_prod_guard COMMAND qixi_policy_only_selection_prod_guard)
 add_test(NAME qixi_stream_deserialize COMMAND qixi_stream_deserialize)
+add_test(NAME qixi_store_persist_strict COMMAND qixi_store_persist_strict)
 add_test(NAME qixi_memory_pressure_relief COMMAND qixi_memory_pressure_relief)

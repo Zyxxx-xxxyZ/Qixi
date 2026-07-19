@@ -34,6 +34,38 @@ Do not treat iOS Simulator success as Metal mux inference evidence.
 
 ### Device install = product package (mandatory)
 
+**After EACH file modification that affects the app, you MUST rebuild and install
+the newest NativeRelease binary on the physical iPad.** Do not stop at Simulator
+install. Simulator-only is never a substitute for shipping to the user’s iPad.
+
+Default physical device (when available / paired):
+
+- Name: **曾逸轩的iPad**
+- CoreDevice id: `21ABE4B1-1509-5D45-9645-75A52D050D68`
+- Hardware UDID: `00008142-000E25660120401C`
+- Bundle id: `com.zyx.qixi.local-device`
+- Team: `Q795QF39Y5`
+- Config: **`NativeRelease`** for `iphoneos` (not `iphonesimulator`)
+- KataGo libs (device): prefer
+  `/private/tmp/qixi-ios-katago-cmake-preflight-iphoneos-katago_core-product/`
+  (`libkatago_core.a` + `libKataGoSwift.a`)
+
+Typical flow after product source edits:
+
+```sh
+# 1) Build for device
+xcodebuild -scheme Qixi -configuration NativeRelease \
+  -destination "platform=iOS,id=00008142-000E25660120401C" \
+  DEVELOPMENT_TEAM=Q795QF39Y5 \
+  QIXI_KATAGO_IOS_LIBRARY_DIR=.../iphoneos-... \
+  QIXI_KATAGO_IOS_LIBRARY=.../libkatago_core.a \
+  build
+
+# 2) Install + launch on the physical iPad
+xcrun devicectl device install app --device 21ABE4B1-1509-5D45-9645-75A52D050D68 path/to/Qixi.app
+xcrun devicectl device process launch --device 21ABE4B1-1509-5D45-9645-75A52D050D68 com.zyx.qixi.local-device
+```
+
 When asked to **install the app on a device** (iPad/iPhone), that means:
 
 1. **Product build**, not Debug. Prefer **`NativeRelease`**:
@@ -47,6 +79,7 @@ When asked to **install the app on a device** (iPad/iPhone), that means:
    a product install. Rebuild NativeRelease (and required
    `libkatago_core.a` / `libKataGoSwift.a` for **iphoneos**) when product
    sources changed, then install that app.
+4. **Physical iPad, not Simulator**, unless the user explicitly asks for sim only.
 
 Debug device installs are only for explicitly requested diagnostics (e.g.
 “Debug build” / bridge smoke), never as the default meaning of “install the app.”

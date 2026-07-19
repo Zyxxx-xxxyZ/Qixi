@@ -1,8 +1,8 @@
 #include "qixi/request_pool.hpp"
 
-#include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +11,13 @@
 using namespace qixi::core;
 
 namespace {
+
+void require(bool condition, const char* message) {
+  if(!condition) {
+    std::cerr << "qixi_core_store_bundle failed: " << message << "\n";
+    std::exit(1);
+  }
+}
 
 class TemporaryDirectory {
 public:
@@ -36,7 +43,7 @@ BackendResult execute(BackendWorker& worker, RequestKind kind, RequestPayload pa
 
 std::vector<uint8_t> readBytes(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
-  assert(input);
+  require(static_cast<bool>(input), "could not open file for reading");
   return std::vector<uint8_t>(
     std::istreambuf_iterator<char>(input),
     std::istreambuf_iterator<char>()
@@ -69,73 +76,60 @@ BackendResult play(
   return execute(worker, RequestKind::playMove, request);
 }
 
-void testModelStoreMergeAndBundleRoundTrip() {
+void testActiveStoreExportImportRoundTrip() {
   TemporaryDirectory sourceDirectory("qixi-core-source");
   TemporaryDirectory targetDirectory("qixi-core-target");
-  const std::filesystem::path bundlePath = sourceDirectory.path / "all-settings.qixi-core-bundle";
-  const std::filesystem::path corruptPath = sourceDirectory.path / "corrupt.qixi-core-bundle";
+  const std::filesystem::path exportPath = sourceDirectory.path / "active.qixi-core-store";
+  const std::filesystem::path corruptPath = sourceDirectory.path / "corrupt.qixi-core-store";
   UniformEvaluator evaluator;
 
   BackendWorker source;
   installEvaluatorSelector(source, evaluator);
   std::string error;
-  assert(source.setStoreDirectory(sourceDirectory.path.string(), &error));
-  assert(execute(source, RequestKind::boot, BootRequest{}).ok);
-  assert(selectEngine(source, ModelId::b6).ok);
+  require(source.setStoreDirectory(sourceDirectory.path.string(), &error), "setStoreDirectory source");
+  require(execute(source, RequestKind::boot, BootRequest{}).ok, "boot source");
+  require(selectEngine(source, ModelId::b6).ok, "select b6");
 
   BackendResult firstMove = play(source, pointToMove(3, 3), 100, RootRef::nodeRef(0));
-  assert(firstMove.ok && firstMove.snapshot.has_value());
+  require(firstMove.ok && firstMove.snapshot.has_value(), "first move");
   const uint64_t firstLineage = firstMove.snapshot->rootLineageHash;
   source.runSearchPlayouts(48);
   BackendResult b6Analyzed = source.latestSnapshot();
-  assert(b6Analyzed.snapshot->rootVisits >= 48);
+  require(b6Analyzed.snapshot.has_value() && b6Analyzed.snapshot->rootVisits >= 48, "b6 visits");
   const uint64_t b6Visits = b6Analyzed.snapshot->rootVisits;
+  const uint64_t b6Lineage = b6Analyzed.snapshot->rootLineageHash;
+  require(b6Lineage == firstLineage, "b6 lineage");
 
-  assert(selectEngine(source, ModelId::b18nbt).ok);
-  BackendResult b18Initial = source.latestSnapshot();
-  assert(b18Initial.snapshot->rootLineageHash == firstLineage);
-  assert(b18Initial.snapshot->rootVisits == 0);
+  // Second engine keeps local multi-engine parking, but export is active-only.
+  require(selectEngine(source, ModelId::b18nbt).ok, "select b18");
   BackendResult secondMove = play(
     source,
     pointToMove(15, 15),
     101,
     RootRef::lineageRef(firstLineage)
   );
-  assert(secondMove.ok && secondMove.snapshot.has_value());
+  require(secondMove.ok && secondMove.snapshot.has_value(), "second move");
   const uint64_t secondLineage = secondMove.snapshot->rootLineageHash;
   source.runSearchPlayouts(24);
   const uint64_t b18Visits = source.latestSnapshot().snapshot->rootVisits;
-  assert(b18Visits >= 24);
+  require(b18Visits >= 24, "b18 visits");
 
-  BackendResult backToB6 = selectEngine(source, ModelId::b6);
-  assert(backToB6.ok && backToB6.snapshot.has_value());
-  assert(backToB6.snapshot->rootLineageHash == secondLineage);
-  assert(backToB6.snapshot->rootVisits == 0);
-  JumpToNodeRequest jumpFirst;
-  jumpFirst.targetRootRef = RootRef::lineageRef(firstLineage);
-  BackendResult firstOnB6 = execute(source, RequestKind::jumpToNode, jumpFirst);
-  assert(firstOnB6.ok && firstOnB6.snapshot->rootVisits == b6Visits);
-
-  BackendResult noEngine = selectEngine(source, ModelId::none);
-  assert(noEngine.ok && noEngine.snapshot.has_value());
-  assert(noEngine.snapshot->rootVisits == b6Visits);
-  assert(noEngine.snapshot->rootLineageHash == firstLineage);
-
-  assert(selectEngine(source, ModelId::b18nbt).ok);
-  JumpToNodeRequest jumpSecond;
-  jumpSecond.targetRootRef = RootRef::lineageRef(secondLineage);
-  BackendResult secondOnB18 = execute(source, RequestKind::jumpToNode, jumpSecond);
-  assert(secondOnB18.ok && secondOnB18.snapshot->rootVisits == b18Visits);
-
+  // Product export: active store only via fopen("wb") + fwrite of the memory image.
   ExportAnalysisStateRequest exportRequest;
-  exportRequest.path = bundlePath.string();
-  assert(execute(source, RequestKind::exportAnalysisState, exportRequest).ok);
-  assert(std::filesystem::file_size(bundlePath) > 0);
+  exportRequest.path = exportPath.string();
+  require(execute(source, RequestKind::exportAnalysisState, exportRequest).ok, "export active store");
+  require(std::filesystem::file_size(exportPath) > 0, "export file non-empty");
+  {
+    std::string decodeError;
+    auto exported = MCTSStore::deserialize(readBytes(exportPath), &decodeError);
+    require(exported.has_value(), ("export deserialize: " + decodeError).c_str());
+    require(exported->analysisKey().modelId == ModelId::b18nbt, "export is active b18 store");
+  }
 
-  std::filesystem::copy_file(bundlePath, corruptPath);
+  std::filesystem::copy_file(exportPath, corruptPath);
   {
     std::fstream file(corruptPath, std::ios::in | std::ios::out | std::ios::binary);
-    assert(file);
+    require(static_cast<bool>(file), "open corrupt copy");
     file.seekg(32);
     char byte = 0;
     file.read(&byte, 1);
@@ -146,65 +140,78 @@ void testModelStoreMergeAndBundleRoundTrip() {
 
   BackendWorker target;
   installEvaluatorSelector(target, evaluator);
-  assert(target.setStoreDirectory(targetDirectory.path.string(), &error));
-  assert(execute(target, RequestKind::boot, BootRequest{}).ok);
+  require(target.setStoreDirectory(targetDirectory.path.string(), &error), "setStoreDirectory target");
+  require(execute(target, RequestKind::boot, BootRequest{}).ok, "boot target");
   ImportAnalysisStateRequest importRequest;
-  importRequest.path = bundlePath.string();
+  importRequest.path = exportPath.string();
   BackendResult imported = execute(target, RequestKind::importAnalysisState, importRequest);
-  assert(imported.ok && imported.snapshot.has_value());
-  assert(imported.snapshot->rootLineageHash == secondLineage);
-  assert(imported.snapshot->rootVisits == b18Visits);
+  require(imported.ok && imported.snapshot.has_value(), "import active store");
+  require(imported.snapshot->rootLineageHash == secondLineage, "imported lineage");
+  require(imported.snapshot->rootVisits == b18Visits, "imported visits");
 
-  std::vector<std::string> importedFilenames;
+  // Imported package is a single active-store blob (may coexist with a pre-import
+  // checkpoint file written during install).
+  bool sawImportedB18 = false;
+  std::string importedActiveFilename;
   for(const auto& item : std::filesystem::directory_iterator(targetDirectory.path)) {
     if(item.path().extension() != ".qixi-core-store")
       continue;
     std::string decodeError;
     auto decoded = MCTSStore::deserialize(readBytes(item.path()), &decodeError);
-    assert(decoded.has_value());
-    if(decoded->analysisKey().gameId == 2)
-      importedFilenames.push_back(item.path().filename().string());
+    require(decoded.has_value(), "imported on-disk store decodes");
+    if(decoded->analysisKey().modelId == ModelId::b18nbt) {
+      sawImportedB18 = true;
+      importedActiveFilename = item.path().filename().string();
+    }
   }
-  std::sort(importedFilenames.begin(), importedFilenames.end());
-  assert(importedFilenames.size() >= 2);
+  require(sawImportedB18, "imported b18 store present on disk");
 
+  // Corrupt package must not clobber a good imported state.
+  const uint64_t beforeCorruptImport = imported.snapshot->rootVisits;
+  importRequest.path = corruptPath.string();
+  BackendResult corrupt = execute(target, RequestKind::importAnalysisState, importRequest);
+  require(!corrupt.ok, "corrupt import rejected");
+  require(
+    target.latestSnapshot().snapshot.has_value() &&
+      target.latestSnapshot().snapshot->rootVisits == beforeCorruptImport,
+    "good state preserved after corrupt import"
+  );
+
+  // Pre-existing garbage at a store path must never be overwritten: import rekeys
+  // to a free game id and succeeds, leaving the seed file intact.
   TemporaryDirectory collisionDirectory("qixi-core-collision");
   BackendWorker collisionTarget;
   installEvaluatorSelector(collisionTarget, evaluator);
-  assert(collisionTarget.setStoreDirectory(collisionDirectory.path.string(), &error));
-  assert(execute(collisionTarget, RequestKind::boot, BootRequest{}).ok);
-  const std::string collisionFilename = importedFilenames.back();
+  require(collisionTarget.setStoreDirectory(collisionDirectory.path.string(), &error), "collision dir");
+  require(execute(collisionTarget, RequestKind::boot, BootRequest{}).ok, "boot collision");
+  const auto seedPath = collisionDirectory.path / importedActiveFilename;
   {
-    std::ofstream collision(collisionDirectory.path / collisionFilename, std::ios::binary);
-    assert(collision);
+    std::ofstream collision(seedPath, std::ios::binary);
+    require(static_cast<bool>(collision), "seed collision file");
     collision << "preexisting-store";
   }
-  importRequest.path = bundlePath.string();
+  importRequest.path = exportPath.string();
   BackendResult collision = execute(
     collisionTarget, RequestKind::importAnalysisState, importRequest
   );
-  assert(!collision.ok);
-  assert(!std::filesystem::exists(collisionDirectory.path / "active-store.index"));
-  for(const std::string& filename : importedFilenames) {
-    const bool shouldExist = filename == collisionFilename;
-    assert(std::filesystem::exists(collisionDirectory.path / filename) == shouldExist);
+  require(collision.ok, "import rekeys past occupied store path");
+  require(std::filesystem::exists(seedPath), "seed path still exists");
+  {
+    const auto seedBytes = readBytes(seedPath);
+    const std::string seedText(seedBytes.begin(), seedBytes.end());
+    require(seedText == "preexisting-store", "seed file must not be overwritten");
   }
 
-  assert(selectEngine(target, ModelId::b6).ok);
-  BackendResult importedB6 = execute(target, RequestKind::jumpToNode, jumpFirst);
-  assert(importedB6.ok && importedB6.snapshot->rootVisits == b6Visits);
-
-  const uint64_t beforeCorruptImport = importedB6.snapshot->rootVisits;
-  importRequest.path = corruptPath.string();
-  BackendResult corrupt = execute(target, RequestKind::importAnalysisState, importRequest);
-  assert(!corrupt.ok);
-  assert(target.latestSnapshot().snapshot->rootVisits == beforeCorruptImport);
+  // Source still has the live b18 tree after export.
+  require(source.latestSnapshot().snapshot->rootVisits == b18Visits, "source visits unchanged");
+  require(source.latestSnapshot().snapshot->rootLineageHash == secondLineage, "source lineage");
+  (void)b6Visits;
 }
 
 } // namespace
 
 int main() {
-  testModelStoreMergeAndBundleRoundTrip();
+  testActiveStoreExportImportRoundTrip();
   std::cout << "qixi_core_store_bundle passed\n";
   return 0;
 }

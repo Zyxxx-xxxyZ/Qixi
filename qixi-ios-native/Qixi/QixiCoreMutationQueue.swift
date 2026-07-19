@@ -31,6 +31,8 @@ protocol QixiCoreMutationHost: AnyObject {
   var coreBackendService: (any QixiCoreBackendService)? { get }
   var analysisService: any QixiAnalysisService { get }
   var coreBackendEpoch: UInt64 { get }
+  /// UI-selected engine; used to drop superseded model loads still sitting on the queue.
+  var selectedEngine: AnalysisEngine { get }
 
   func applyCoreBackendResult(
     _ result: QixiCoreBackendResult,
@@ -48,6 +50,12 @@ protocol QixiCoreMutationHost: AnyObject {
   ) async
   func noteCoreMutationSucceeded(reason: String)
   func recordCoreRuntimeDiagnostic(event: String, success: Bool, message: String)
+  /// Build a metrics-only backend result after setEngine (no heavy tree snapshot).
+  func makeEngineSelectionResult(engine: AnalysisEngine) -> QixiCoreBackendResult
+  /// Mark the engine actually resident in the native core after a successful setEngine.
+  func noteCoreEngineSelectionCommitted(_ engine: AnalysisEngine)
+  /// Live on-device switch monitor phases (no-op allowed for tests).
+  func noteEngineSwitchPhase(_ phase: String, detail: String?)
 }
 
 @MainActor
@@ -104,16 +112,42 @@ final class QixiCoreMutationQueue {
     host: QixiCoreMutationHost,
     completion: (@MainActor (Bool) -> Void)? = nil
   ) {
-    enqueue(
-      QixiPendingCoreMutation(
-        operation: .selectEngine(engine),
-        reason: reason,
-        optimisticVariationNodeID: nil,
-        uiIntentID: nil,
-        completion: completion
-      ),
-      host: host
+    // Drop any not-yet-started selectEngine ops — only the latest model pick matters.
+    // Completions fire false so superseded UI barriers can release without rollback.
+    var kept: [QixiPendingCoreMutation] = []
+    var dropped = 0
+    for index in head..<queue.count {
+      if case .selectEngine = queue[index].operation {
+        queue[index].completion?(false)
+        dropped += 1
+      } else {
+        kept.append(queue[index])
+      }
+    }
+    if dropped > 0 {
+      queue = Array(queue[0..<head]) + kept
+      pendingCount = max(0, pendingCount - dropped)
+    }
+    // Jump the queue: model switch must not wait behind a backlog of play/jump mutations.
+    // The in-flight head (if any) still finishes; the new selectEngine runs next.
+    let pending = QixiPendingCoreMutation(
+      operation: .selectEngine(engine),
+      reason: reason,
+      optimisticVariationNodeID: nil,
+      uiIntentID: nil,
+      completion: completion
     )
+    guard host.coreBackendService != nil else {
+      completion?(false)
+      return
+    }
+    if head < queue.count {
+      queue.insert(pending, at: head)
+    } else {
+      queue.append(pending)
+    }
+    pendingCount += 1
+    startPumpIfNeeded(host: host)
   }
 
   func waitForDrain() async {
@@ -185,19 +219,63 @@ final class QixiCoreMutationQueue {
       let pending = queue[head]
       head += 1
       do {
-        let result: QixiCoreBackendResult
+        var result: QixiCoreBackendResult
         switch pending.operation {
         case .request(let queuedRequest):
           let request = queuedRequest.replacingExpectedBackendEpoch(host.coreBackendEpoch)
           result = try await core.submitCoreRequest(request)
         case .selectEngine(let engine):
+          // Skip loading a model the UI already abandoned (rapid re-picks).
+          // Exception: .none (quiesce/unload) must always run — import, model install,
+          // and memory pressure request unload while selectedEngine still reflects the
+          // previous UI pick. Treating that as "superseded" made open .qixi-mcts fail with
+          // coreMCTSStateImportQuiesce failed.
+          if engine != .none, host.selectedEngine != engine {
+            host.recordCoreRuntimeDiagnostic(
+              event: "coreBackendSetEngineSuperseded",
+              success: true,
+              message: "skip load engine=\(engine.rawValue) selected=\(host.selectedEngine.rawValue)"
+            )
+            pendingCount = max(0, pendingCount - 1)
+            pending.completion?(false)
+            continue
+          }
+          // Wall time for the whole setEngine hop (actor + bridge + core submitAndWait).
+          // If this is >> engineSelector_ms from core, the stall is outside NN load.
+          host.noteEngineSwitchPhase("setEngine_start", detail: "engine=\(engine.rawValue)")
+          // setEngine is detached from the analysis actor (see NativeKataGoAnalysisService);
+          // this await should track only configure+loadEngine, not snapshot starvation.
+          let setEngineWallStart = ContinuousClock.now
           let status = try await host.analysisService.setEngine(engine)
+          let setEngineWallMs = Int((ContinuousClock.now - setEngineWallStart) / .milliseconds(1))
+          // If the user picked another *real* model mid-load, do not treat this as live.
+          // Quiesce (.none) is never discarded for a mid-flight selection change.
+          if engine != .none, host.selectedEngine != engine {
+            host.noteEngineSwitchPhase("setEngine_superseded", detail: "wall=\(setEngineWallMs)ms")
+            host.recordCoreRuntimeDiagnostic(
+              event: "coreBackendSetEngineSuperseded",
+              success: true,
+              message: "discard load engine=\(engine.rawValue) selected=\(host.selectedEngine.rawValue) setEngine_wall_ms=\(setEngineWallMs)"
+            )
+            pendingCount = max(0, pendingCount - 1)
+            pending.completion?(false)
+            continue
+          }
+          host.noteEngineSwitchPhase(
+            "setEngine_status",
+            detail: "wall=\(setEngineWallMs)ms state=\(status.state)"
+          )
+          // Timing from core (nodes / store_MB / engineSelector_ms / …) is in status.state
+          // when present; always log the full status for switch diagnosis.
           host.recordCoreRuntimeDiagnostic(
             event: "coreBackendSetEngine",
             success: true,
-            message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state)"
+            message: "engine=\(status.engine) engineId=\(status.engineId ?? "") state=\(status.state) setEngine_wall_ms=\(setEngineWallMs) | SWITCH_TIMING_SEE_CORE_MESSAGE"
           )
-          result = try await core.latestCoreSnapshot()
+          // Keep loadedEngine in sync for selectEngineAndWait paths (import quiesce, etc.).
+          host.noteCoreEngineSelectionCommitted(engine)
+          // Never pull a full tree snapshot on the engine-switch critical path.
+          result = host.makeEngineSelectionResult(engine: engine)
         }
         pendingCount = max(0, pendingCount - 1)
         if !result.ok {

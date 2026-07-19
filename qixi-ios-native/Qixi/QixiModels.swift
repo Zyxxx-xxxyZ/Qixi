@@ -7,7 +7,12 @@ enum QixiAnalysisLimits {
   static let minKomi = -150.0
   static let maxKomi = 150.0
   static let defaultKomi = 7.5
-  static let defaultRootNoise = 0.0
+  /// Hard floor for valid wide-root-noise (0 disables extra root exploration).
+  static let minRootNoise = 0.0
+  /// First-launch / missing-preference product default.
+  static let defaultRootNoise = 0.04
+  /// Soft upper bound for the main-page wide-root-noise number field.
+  static let uiMaxRootNoise = 2.0
 
   static func isValidMaxVisits(_ value: Int) -> Bool {
     value >= minMaxVisits && value <= maxMaxVisits
@@ -18,7 +23,7 @@ enum QixiAnalysisLimits {
   }
 
   static func isValidRootNoise(_ value: Double) -> Bool {
-    value.isFinite && value >= defaultRootNoise
+    value.isFinite && value >= minRootNoise
   }
 
   static func normalizedKomi(_ value: Double) -> Double {
@@ -28,7 +33,7 @@ enum QixiAnalysisLimits {
 
   static func normalizedRootNoise(_ value: Double) -> Double {
     guard value.isFinite else { return defaultRootNoise }
-    return max(defaultRootNoise, value)
+    return max(minRootNoise, value)
   }
 }
 
@@ -113,11 +118,12 @@ struct AnalysisRequest: Encodable {
     setupStones: [BoardSetupStone] = [],
     maxVisits: Int,
     komi: Double,
-    rootNoise: Double
+    rootNoise: Double,
+    rootToMove: StoneColor = .black
   ) {
     self.moves = moves.map(MovePayload.init(move:))
     self.setupStones = setupStones
-    self.nextPlayer = QixiBoardPosition.nextPlayer(after: moves).rawValue
+    self.nextPlayer = QixiBoardPosition.nextPlayer(after: moves, rootToMove: rootToMove).rawValue
     self.maxVisits = maxVisits
     self.komi = komi
     self.rootNoise = rootNoise
@@ -260,8 +266,15 @@ enum QixiBoardPosition {
     return nil
   }
 
-  static func nextPlayer(after moves: [BoardMove]) -> StoneColor {
-    guard let last = moves.last else { return .black }
+  /// Side to move after `moves`.
+  /// - Parameter rootToMove: Color to play when `moves` is empty (root). Defaults to Black.
+  ///   Pass the first move color of the current line when the game can start with White
+  ///   (SGF setup + W first, some handicap-style dumps). Bare even/odd ply is not sufficient.
+  static func nextPlayer(
+    after moves: [BoardMove],
+    rootToMove: StoneColor = .black
+  ) -> StoneColor {
+    guard let last = moves.last else { return rootToMove }
     return last.color == .black ? .white : .black
   }
 
@@ -421,6 +434,8 @@ struct VisibleCandidateOverlay: Identifiable, Equatable {
   var continuationRingColor: StoneColor? = nil
   var showsAnalysisText: Bool = true
   var usesStoneSizedContinuationMarker: Bool = false
+  /// 0…1 presentation weight for enter/exit color gradients (1 = fully in display set).
+  var presentationWeight: Double = 1.0
 }
 
 struct TerritoryPoint: Identifiable, Codable, Equatable {
@@ -497,6 +512,7 @@ enum QixiUtilitySheet: String, Identifiable {
   case camera
   case importGame
   case sync
+  case exportShare
 
   var id: String { rawValue }
 
@@ -506,9 +522,28 @@ enum QixiUtilitySheet: String, Identifiable {
     case "camera": self = .camera
     case "import": self = .importGame
     case "sync": self = .sync
+    case "export", "exportShare": self = .exportShare
     default: return nil
     }
   }
+}
+
+enum QixiUnsavedChoice {
+  case save
+  case discard
+  case cancel
+}
+
+enum QixiUnsavedKind: Equatable {
+  case newGame
+  case openSheet
+  case openArchive(QixiSyncStore.ArchiveListItem)
+  case appBackground
+}
+
+struct QixiUnsavedChangesDecision: Identifiable, Equatable {
+  let id = UUID()
+  var kind: QixiUnsavedKind
 }
 
 struct ChartPoint: Identifiable {

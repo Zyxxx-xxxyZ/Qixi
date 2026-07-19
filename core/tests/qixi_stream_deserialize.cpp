@@ -45,7 +45,7 @@ int main() {
   if(bytes.size() < 32)
     fail("serialize produced undersized blob");
 
-  // In-memory path with progress must also succeed and be monotonic.
+  // In-memory path with optional progress still succeeds (diagnostic only).
   {
     std::vector<std::string> memPhases;
     double memLast = -1.0;
@@ -70,67 +70,38 @@ int main() {
 
   const std::filesystem::path path =
     std::filesystem::temp_directory_path() /
-    ("qixi-stream-deserialize-test-" +
+    ("qixi-oneshot-deserialize-test-" +
      std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()) +
      ".qixi-core-store");
-  {
-    FILE* f = std::fopen(path.string().c_str(), "wb");
-    if(f == nullptr)
-      fail("could not open temp file for writing");
-    const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), f);
-    if(std::fclose(f) != 0)
-      fail("could not close temp file after writing");
-    if(written != bytes.size())
-      fail("short write of serialized store");
-  }
-  if(!std::filesystem::exists(path) || std::filesystem::file_size(path) != bytes.size())
-    fail("temp store file missing or wrong size after write");
 
-  std::vector<std::string> phases;
-  double lastFraction = -1.0;
-  auto progress = [&](const MCTSStore::DeserializeProgress& p) {
-    if(phases.empty() || phases.back() != p.phase)
-      phases.push_back(p.phase);
-    if(p.fraction + 1e-9 < lastFraction)
-      fail("file progress went backwards");
-    lastFraction = p.fraction;
-    if(p.fraction < 0.0 || p.fraction > 1.0 + 1e-9)
-      fail("file progress out of range");
-  };
+  // Product path: one-shot persistToFile / loadFromFile (no streaming progress).
+  {
+    std::string writeError;
+    if(!store.persistToFile(path.string(), &writeError))
+      fail(("persistToFile failed: " + writeError).c_str());
+  }
+  if(!std::filesystem::exists(path) || std::filesystem::file_size(path) < 32)
+    fail("temp store file missing or undersized after one-shot write");
 
   std::string error;
-  auto loaded = MCTSStore::deserializeFromFile(path.string(), 64ULL * 1024ULL * 1024ULL, &error, progress);
+  auto loaded = MCTSStore::loadFromFile(path.string(), 64ULL * 1024ULL * 1024ULL, &error);
   if(!loaded.has_value()) {
-    std::fprintf(stderr, "deserializeFromFile failed: %s\n", error.c_str());
+    std::fprintf(stderr, "loadFromFile failed: %s\n", error.c_str());
     std::filesystem::remove(path);
     return 1;
   }
-  if(lastFraction < 0.99)
-    fail("file progress did not complete");
-  if(phases.empty())
-    fail("no progress phases reported");
-  bool sawReading = false;
-  bool sawVerify = false;
-  bool sawParse = false;
-  bool sawComplete = false;
-  for(const auto& phase : phases) {
-    if(phase == "reading")
-      sawReading = true;
-    if(phase == "verifying")
-      sawVerify = true;
-    if(phase == "parsing_nodes" || phase == "parsing_header")
-      sawParse = true;
-    if(phase == "complete")
-      sawComplete = true;
-  }
-  if(!sawReading)
-    fail("missing reading phase");
-  if(!sawVerify)
-    fail("missing verifying phase");
-  if(!sawParse)
-    fail("missing parse phase");
-  if(!sawComplete)
-    fail("missing complete phase");
+  // deserializeFromFile is an alias that ignores progress.
+  auto loadedAlias = MCTSStore::deserializeFromFile(
+    path.string(),
+    64ULL * 1024ULL * 1024ULL,
+    &error,
+    [](const MCTSStore::DeserializeProgress&) {
+      fail("file load must not stream progress callbacks");
+    }
+  );
+  if(!loadedAlias.has_value())
+    fail(("deserializeFromFile alias failed: " + error).c_str());
+
   if(loaded->memoryStats().nodeCount < 1)
     fail("loaded store has no nodes");
   if(loaded->memoryStats().nodeCount != store.memoryStats().nodeCount)
@@ -139,5 +110,6 @@ int main() {
     fail("loaded root mismatch");
 
   std::filesystem::remove(path);
+  std::printf("qixi_stream_deserialize passed (one-shot file I/O)\n");
   return 0;
 }

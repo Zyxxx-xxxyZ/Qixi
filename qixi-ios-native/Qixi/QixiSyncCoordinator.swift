@@ -1,7 +1,7 @@
 import Foundation
 
-/// Manual Sync Now orchestration (UI + onboarding). Autosave iCloud mirror stays on
-/// `QixiPersistenceCoordinator` with a separate task.
+/// Manual Sync Now orchestration (UI + onboarding).
+/// Product policy: no autosave / auto-sync — only this path writes local + iCloud snapshots.
 @MainActor
 final class QixiSyncCoordinator {
   private weak var host: QixiSyncFeatureHost?
@@ -19,58 +19,69 @@ final class QixiSyncCoordinator {
 
   func syncNow() {
     guard let host else { return }
-    guard !host.isBackendInteractionBlocked else { return }
-    let wasSyncEnabled = host.iCloudSyncEnabled
-    let localSnapshot: QixiAppSnapshot?
+    // Wait out blocking transitions rather than silently no-op (felt like "Sync dead").
+    if host.isBackendInteractionBlocked {
+      Task { [weak self, weak host] in
+        guard let self, let host else { return }
+        for _ in 0..<100 {
+          if !host.isBackendInteractionBlocked { break }
+          try? await Task.sleep(for: .milliseconds(50))
+        }
+        guard !host.isBackendInteractionBlocked else {
+          host.noteSyncMirrorFailure("Sync deferred: backend still busy")
+          return
+        }
+        self.syncNow()
+      }
+      return
+    }
+    // Single-flight: cancel in-progress manual sync and any debounced local save
+    // so we do not race two writers on the same snapshot paths.
+    syncTask?.cancel()
+    host.cancelPendingPersistenceSave()
+    // Prefer iCloud when the container is available (no user config/authorization).
+    if QixiSyncStore.isICloudContainerAvailable, !host.iCloudSyncEnabled {
+      host.setICloudSyncEnabled(true)
+    }
+    let localSnapshot: QixiAppSnapshot
     do {
-      localSnapshot = try localSnapshotForManualSync(host: host)
+      localSnapshot = try forceLocalSnapshotForManualSync(host: host)
     } catch {
       host.notePersistenceError(String(describing: error))
       host.noteSyncMirrorFailure(String(describing: error))
       return
     }
-    syncTask?.cancel()
     syncTask = Task { [weak self, weak host] in
       guard let host else { return }
       do {
+        try Task.checkCancellation()
+        // Always push current local state to the sync destination (iCloud when available).
+        try QixiSyncStore.write(localSnapshot)
+        try Task.checkCancellation()
         let result = try QixiSyncStore.reconcile(localSnapshot: localSnapshot)
+        try Task.checkCancellation()
         if let imported = result.importedSnapshot {
           host.applyImportedAppSnapshot(imported)
           host.resumeAnalysisAfterImportedSnapshot()
-        } else if localSnapshot == nil {
-          let initialSnapshot = host.buildAppSnapshot(reason: "manualSync")
-          try QixiSnapshotStore.save(initialSnapshot)
-          try QixiSyncStore.write(initialSnapshot)
-          host.notePersistenceError(nil)
         }
         try await host.mirrorVisibleMCTSStatePackageAfterManualSync(result: result)
+        try Task.checkCancellation()
         host.noteSyncResult(result)
+        host.notePersistenceError(nil)
+      } catch is CancellationError {
+        // Superseded by a newer syncNow — leave status unchanged.
       } catch {
-        if !wasSyncEnabled {
-          host.setICloudSyncEnabled(false)
-        }
         host.noteSyncMirrorFailure(String(describing: error))
       }
       _ = self
     }
   }
 
-  private func localSnapshotForManualSync(host: QixiSyncFeatureHost) throws -> QixiAppSnapshot? {
-    // Match prior ViewModel/PersistenceCoordinator semantics for manual sync prep.
+  /// Manual sync always snapshots current UI — even empty new-game state — so iCloud
+  /// receives a write (previously "untouched" skipped and looked dead).
+  private func forceLocalSnapshotForManualSync(host: QixiSyncFeatureHost) throws -> QixiAppSnapshot {
+    host.cancelPendingPersistenceSave()
     let snapshot = host.buildAppSnapshot(reason: "manualSync")
-    guard let persisted = QixiSnapshotStore.load() else {
-      guard !host.isUntouchedLaunchDefaultState else {
-        host.notePersistenceError(nil)
-        return nil
-      }
-      try QixiSnapshotStore.save(snapshot)
-      host.notePersistenceError(nil)
-      return snapshot
-    }
-    guard !snapshot.hasSameRestorableState(as: persisted) else {
-      host.notePersistenceError(nil)
-      return persisted
-    }
     try QixiSnapshotStore.save(snapshot)
     host.notePersistenceError(nil)
     return snapshot

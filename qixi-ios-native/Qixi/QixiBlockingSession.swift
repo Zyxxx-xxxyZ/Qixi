@@ -81,10 +81,12 @@ final class QixiBlockingSession {
           await MainActor.run {
             guard byToken[token] != nil else { return }
             let phase = progress.phase.isEmpty ? nil : progress.phase
+            let unitsDone = progress.unitsDone ?? progress.bytesDone
+            let unitsTotal = progress.unitsTotal ?? progress.bytesTotal
             let fraction: Double?
             if progress.active {
-              if progress.bytesTotal > 0 {
-                fraction = Double(progress.bytesDone) / Double(progress.bytesTotal)
+              if unitsTotal > 0 {
+                fraction = Double(unitsDone) / Double(unitsTotal)
               } else if progress.fraction > 0 {
                 fraction = progress.fraction
               } else {
@@ -93,9 +95,10 @@ final class QixiBlockingSession {
             } else {
               fraction = nil
             }
+            // Prefer streaming unit counts (e.g. 120/15630) over byte formatting.
             let detail: String?
-            if progress.bytesTotal > 0 {
-              detail = Self.formatByteProgress(done: progress.bytesDone, total: progress.bytesTotal)
+            if unitsTotal > 0 {
+              detail = "\(unitsDone)/\(unitsTotal)"
             } else if !progress.message.isEmpty {
               detail = progress.message
             } else {

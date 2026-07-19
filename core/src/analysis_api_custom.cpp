@@ -182,6 +182,62 @@ public:
       store_->treeSelectionMode() == core::TreeSelectionMode::testNnPolicyOnly;
   }
 
+  bool memoryUnloadAndReload(std::string* error) override {
+    if(!store_) {
+      if(error) *error = "no line loaded";
+      return false;
+    }
+    const bool wantPolicyOnly =
+      store_->treeSelectionMode() == core::TreeSelectionMode::testNnPolicyOnly;
+    const core::NodeId expectRoot = store_->currentRoot();
+    const uint64_t visitsBefore = store_->snapshot().rootVisits;
+
+    const auto mem = store_->memoryStats();
+    const std::vector<uint8_t> bytes = store_->serialize();
+    if(bytes.empty()) {
+      if(error) {
+        *error =
+          "serialize produced empty blob (store too large or invalid; nodes=" +
+          std::to_string(mem.nodeCount) + " actions=" + std::to_string(mem.actionCount) +
+          " policyFloats=" + std::to_string(mem.policyFloatCount) +
+          " ownershipFloats=" + std::to_string(mem.ownershipFloatCount) + ")";
+      }
+      return false;
+    }
+
+    // Drop live store (simulate memory unload).
+    store_.reset();
+
+    std::string importError;
+    auto restored = core::MCTSStore::deserialize(bytes, &importError);
+    if(!restored) {
+      if(error) *error = "deserialize failed: " + importError;
+      return false;
+    }
+    store_ = std::move(*restored);
+    store_->setEvaluator(evaluator_);
+    if(wantPolicyOnly) {
+      if(!store_->setTreeSelectionMode(
+           core::TreeSelectionMode::testNnPolicyOnly,
+           core::MCTSStore::kTestSelectionModeAllowToken,
+           error
+         )) {
+        return false;
+      }
+    }
+    // Restore root view to the same node id (ids are preserved by serialize).
+    if(expectRoot != store_->currentRoot()) {
+      if(!store_->switchRoot(expectRoot, error))
+        return false;
+    }
+    if(store_->snapshot().rootVisits != visitsBefore) {
+      if(error) *error = "root visits changed across unload/reload";
+      return false;
+    }
+    // currentPly_ and rootNodeByPly_ remain valid: NodeIds are stable across serialize.
+    return true;
+  }
+
 private:
   core::Evaluator* evaluator_ = nullptr;
   GameLine line_{};

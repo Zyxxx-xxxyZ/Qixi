@@ -117,6 +117,45 @@ struct QixiVariationModel {
     return path
   }
 
+  /// Prefer the user's previous scrubber path when those nodes still exist after a core
+  /// light-tree refresh. Falls back to first-child primary path only for missing segments.
+  func spinePreservingPreviousPath(previousPath: [String], currentID: String) -> [String] {
+    let current = records[currentID] == nil ? Self.rootID : currentID
+    guard let currentIndex = previousPath.firstIndex(of: current) else {
+      return primaryPathNodeIDs(from: current)
+    }
+    var spine: [String] = []
+    for id in previousPath[...currentIndex] {
+      guard records[id] != nil else { continue }
+      if spine.isEmpty {
+        spine.append(id)
+        continue
+      }
+      if records[id]?.parentID == spine.last {
+        spine.append(id)
+      }
+    }
+    if spine.last != current {
+      spine = pathNodeIDs(to: current)
+    }
+    // Forward: continue along previous path when child links still match.
+    if currentIndex + 1 < previousPath.count {
+      for id in previousPath[(currentIndex + 1)...] {
+        guard records[id] != nil else { break }
+        guard records[id]?.parentID == spine.last else { break }
+        spine.append(id)
+      }
+    }
+    // If no forward spine preserved, extend with first-child primary (exploration default).
+    if spine.last == current {
+      let primary = primaryPathNodeIDs(from: current)
+      if primary.count > 1 {
+        spine.append(contentsOf: primary.dropFirst())
+      }
+    }
+    return spine
+  }
+
   func nodeID(onCurrentPathAt ply: Int, mainLineCount: Int) -> String {
     let boundedPly = min(max(0, ply), mainLineCount)
     guard boundedPly < currentPathNodeIDs.count else {
@@ -143,40 +182,67 @@ struct QixiVariationModel {
   mutating func appendMove(_ move: BoardMove, atPly ply: Int) -> String {
     let parentID = currentNodeID
     let nodeID = makeNodeID()
-    let siblings = childIDsByParent[parentID] ?? []
-    let lane: Int
-    if siblings.isEmpty {
-      lane = records[parentID]?.lane ?? 0
-    } else {
-      let parentLane = records[parentID]?.lane ?? 0
-      let siblingIndex = siblings.count
-      lane = parentLane + (siblingIndex.isMultiple(of: 2) ? -siblingIndex : siblingIndex)
-    }
+    // Temporary lane; reassignLanes() resolves global per-ply collisions.
+    let parentLane = records[parentID]?.lane ?? 0
     records[nodeID] = NodeRecord(
       id: nodeID,
       parentID: parentID,
       move: move,
       ply: ply,
-      lane: lane,
+      lane: parentLane,
       isInitial: false
     )
     childIDsByParent[parentID, default: []].append(nodeID)
     childIDsByParent[nodeID] = []
+    reassignLanes()
     // Local optimistic ids invalidate core topology fingerprint.
     lastTopologyFingerprint = 0
     projectionUsesCoreIDs = false
     return nodeID
   }
 
+  /// Prefer a free positive lane below the mainline. Structure mutations use
+  /// `reassignLanes()` (subtree packing); this helper is for one-off callers/tests.
   func nextAvailableLane(preferredSign: Int) -> Int {
     let used = Set(records.values.map(\.lane))
-    var lane = preferredSign >= 0 ? 1 : -1
-    var step = 1
+    // Product layout only stacks side branches downward (positive lanes).
+    var lane = max(1, abs(preferredSign) == 0 ? 1 : abs(preferredSign))
     while used.contains(lane) {
-      step += 1
-      lane = (step % 2 == 0 ? -1 : 1) * ((step + 1) / 2)
+      lane += 1
     }
     return lane
+  }
+
+  /// Non-crossing lane assignment (SGF-style subtree packing):
+  /// - First child continues the parent lane (priority / mainline stem).
+  /// - Later siblings each start on a **fresh lane strictly below** the previous
+  ///   sibling's entire subtree — so prior branches are pushed down and edges
+  ///   never cross when a newer fork opens closer to the mainline.
+  /// - Side branches only use non-negative lanes (downward in the UI).
+  mutating func reassignLanes() {
+    guard let rootID = records.values.first(where: { $0.parentID == nil })?.id else { return }
+
+    /// Assign `nodeID` to `lane` and pack its descendants. Returns the deepest
+    /// (most positive) lane used by this subtree.
+    @discardableResult
+    func layoutSubtree(_ nodeID: String, lane: Int) -> Int {
+      guard var record = records[nodeID] else { return lane }
+      record.lane = lane
+      records[nodeID] = record
+
+      let children = childIDsByParent[nodeID] ?? []
+      guard let first = children.first else { return lane }
+
+      // Priority branch: continue horizontally on the same lane.
+      var deepest = layoutSubtree(first, lane: lane)
+      // Prior/side branches stack strictly below — never above, never interleaved.
+      for childID in children.dropFirst() {
+        deepest = layoutSubtree(childID, lane: deepest + 1)
+      }
+      return deepest
+    }
+
+    _ = layoutSubtree(rootID, lane: 0)
   }
 
   func variationTree(
@@ -223,8 +289,14 @@ struct QixiVariationModel {
       return .noOp
     }
 
-    // Local / optimistic trees must full-rebuild into lineage ids.
+    // Local / optimistic trees must full-rebuild into lineage ids — but only once core
+    // has reached the UI ply. A structure poll still behind Plane B play would rewind.
     if !projectionUsesCoreIDs || hasNonCoreRecordIDs {
+      let uiPly = records[currentNodeID]?.ply ?? 0
+      let coreMaxPly = prepared.nodes.map { Int($0.ply) }.max() ?? 0
+      if coreMaxPly < uiPly {
+        return .noOp
+      }
       fullRebuild(from: prepared, snapshot: snapshot, boardMove: boardMove, currentID: currentID)
       return .structureChanged
     }
@@ -364,14 +436,14 @@ struct QixiVariationModel {
     snapshot: QixiCoreSnapshot,
     currentID: String
   ) -> VariationApplyResult {
-    var nextQuality: [String: Double] = [:]
+    // Merge quality for nodes present in this snapshot. Do not wipe the whole map —
+    // light snapshots are path-capped and would undye side-branch nodes otherwise.
     for node in prepared.nodes {
       let id = Self.coreVariationNodeID(node.lineageHash)
       if let delta = node.qualityDeltaPercent {
-        nextQuality[id] = delta
+        coreQualityDeltaByNodeID[id] = delta
       }
     }
-    coreQualityDeltaByNodeID = nextQuality
 
     let previousCurrent = currentNodeID
     currentNodeID = currentID
@@ -397,7 +469,6 @@ struct QixiVariationModel {
   ) -> Bool {
     var nextRecords: [String: NodeRecord] = [:]
     var nextChildren: [String: [String]] = [:]
-    var laneByCoreID: [UInt32: Int] = [:]
     var nextQuality: [String: Double] = [:]
     var nextRootRef: [String: QixiCoreRootReference] = [:]
 
@@ -405,20 +476,14 @@ struct QixiVariationModel {
       let nodeID = Self.coreVariationNodeID(node.lineageHash)
       // Parent may be absent from the light-capped set (same as full rebuild).
       let parentID = node.parent.flatMap { prepared.variationIDByCoreNodeID[$0] }
-      let siblingIndex = parentID.flatMap { nextChildren[$0]?.count } ?? 0
-      let parentLane = node.parent.flatMap { laneByCoreID[$0] } ?? 0
-      let lane = node.parent == nil
-        ? 0
-        : (siblingIndex == 0 ? parentLane : parentLane + (siblingIndex.isMultiple(of: 2) ? -siblingIndex : siblingIndex))
       let move = boardMove(node.moveFromParent, node.moveColor)
-      // Prefer previous lane when parent and sibling slot unchanged for stability — lanes are
-      // recomputed identically to full rebuild for parity.
+      // Temporary lane 0; reassignLanes() after the child graph is complete.
       nextRecords[nodeID] = NodeRecord(
         id: nodeID,
         parentID: parentID,
         move: move,
         ply: Int(node.ply),
-        lane: lane,
+        lane: 0,
         isInitial: node.parent == nil
       )
       if nextChildren[nodeID] == nil {
@@ -427,8 +492,8 @@ struct QixiVariationModel {
       if let parentID {
         nextChildren[parentID, default: []].append(nodeID)
       }
-      laneByCoreID[node.id] = lane
-      nextRootRef[nodeID] = .lineage(node.lineageHash)
+      // Prefer O(1) Plane B switchRoot by core node id — lineage forces FIFO + full snapshot.
+      nextRootRef[nodeID] = .node(node.id)
       if let delta = node.qualityDeltaPercent {
         nextQuality[nodeID] = delta
       }
@@ -438,8 +503,14 @@ struct QixiVariationModel {
 
     records = nextRecords
     childIDsByParent = nextChildren
+    reassignLanes()
     coreRootReferenceByNodeID = nextRootRef
-    coreQualityDeltaByNodeID = nextQuality
+    // Prefer core quality; keep any prior dyes for lineage ids still present.
+    var mergedQuality = coreQualityDeltaByNodeID.filter { nextRecords[$0.key] != nil }
+    for (id, delta) in nextQuality {
+      mergedQuality[id] = delta
+    }
+    coreQualityDeltaByNodeID = mergedQuality
     currentNodeID = currentID
     currentPathNodeIDs = pathNodeIDs(to: currentNodeID)
     nextSequence = max(nextSequence, records.count + 1)
@@ -456,22 +527,17 @@ struct QixiVariationModel {
   ) {
     var nextRecords: [String: NodeRecord] = [:]
     var nextChildren: [String: [String]] = [:]
-    var laneByNode: [UInt32: Int] = [:]
     for node in prepared.nodes {
       let nodeID = Self.coreVariationNodeID(node.lineageHash)
       let parentID = node.parent.flatMap { prepared.variationIDByCoreNodeID[$0] }
-      let siblingIndex = parentID.flatMap { nextChildren[$0]?.count } ?? 0
-      let parentLane = node.parent.flatMap { laneByNode[$0] } ?? 0
-      let lane = node.parent == nil
-        ? 0
-        : (siblingIndex == 0 ? parentLane : parentLane + (siblingIndex.isMultiple(of: 2) ? -siblingIndex : siblingIndex))
       let move = boardMove(node.moveFromParent, node.moveColor)
+      // Temporary lane 0; reassignLanes() after the child graph is complete.
       nextRecords[nodeID] = NodeRecord(
         id: nodeID,
         parentID: parentID,
         move: move,
         ply: Int(node.ply),
-        lane: lane,
+        lane: 0,
         isInitial: node.parent == nil
       )
       if nextChildren[nodeID] == nil {
@@ -480,14 +546,16 @@ struct QixiVariationModel {
       if let parentID {
         nextChildren[parentID, default: []].append(nodeID)
       }
-      laneByNode[node.id] = lane
     }
     guard nextRecords[currentID] != nil else { return }
     records = nextRecords
     childIDsByParent = nextChildren
+    reassignLanes()
+    // Prefer core node ids so tree/chart jumps use Plane B postNavSwitchRoot (O(1)),
+    // not FIFO jumpToNode + full visible-tree snapshot (multi-second freezes).
     coreRootReferenceByNodeID = Dictionary(
       uniqueKeysWithValues: prepared.nodes.map {
-        (Self.coreVariationNodeID($0.lineageHash), QixiCoreRootReference.lineage($0.lineageHash))
+        (Self.coreVariationNodeID($0.lineageHash), QixiCoreRootReference.node($0.id))
       }
     )
     coreQualityDeltaByNodeID = Dictionary(

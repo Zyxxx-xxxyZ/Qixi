@@ -2,6 +2,7 @@
 
 #include "qixi/mcts.hpp"
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -131,22 +132,43 @@ public:
   BackendResult latestSnapshot() const;
   // High-frequency UI poll: bounded candidates / visible tree (see MCTSStore::snapshotLight).
   BackendResult latestLightSnapshot(
-    size_t maxCandidates = 32,
+    size_t maxCandidates = 10,
     size_t maxVisibleNodes = 4096,
     bool includeOwnership = true
   ) const;
   std::array<bool, kMoveCount> legalMoveMask() const;
   void runSearchPlayouts(uint32_t count);
 
-  // Best-effort progress for long I/O jobs (export/import/checkpoint). Thread-safe.
+  // --- Plane A: lock-free analyze display (no mutex on read path) ---
+  uint64_t publishedAnalyzeRevision() const noexcept;
+  bool tryLoadAnalyzeDisplay(AnalyzeDisplayPayload& out) const noexcept;
+
+  // --- Plane B: single-slot nav intent (not a FIFO queue; UI never locks) ---
+  enum class NavIntentKind : uint8_t { none = 0, play = 1, switchRoot = 2 };
+  struct NavIntent {
+    NavIntentKind kind = NavIntentKind::none;
+    UiIntentId uiIntentId = 0;
+    uint32_t moveOrNode = kInvalidNode;
+  };
+  /// Post latest-wins intent. Returns false only if kind is none. Never blocks.
+  bool postNavIntent(NavIntent intent) noexcept;
+  /// Engine-side: apply pending nav if any (under state ownership). Returns true if applied.
+  bool drainNavIntent();
+
+  // Best-effort progress for long I/O jobs (export/import/checkpoint).
+  // unitsDone/unitsTotal prefer semantic progress (nodes/actions); bytes remain available.
   struct IoProgress {
     bool active = false;
     std::string phase;       // e.g. "serializing", "writing", "reading", "parsing", "activating"
     double fraction = 0.0;   // 0..1 when known; otherwise 0 with active=true
+    uint64_t unitsDone = 0;
+    uint64_t unitsTotal = 0;
+    // Aliases for older call sites (same storage as units*).
     uint64_t bytesDone = 0;
     uint64_t bytesTotal = 0;
     std::string message;
   };
+  /// Lock-free progress snapshot for UI polling (atomics + best-effort phase string).
   IoProgress currentIoProgress() const;
 
   void setEvaluator(Evaluator* evaluator);
@@ -192,16 +214,43 @@ private:
   EngineSelector engineSelector;
   Context ctx;
   IoProgress ioProgress;
+  /// Per-model stores parked on switch so b28↔b18 never reuses each other's visits,
+  /// and a quick switch-back does not wait on async disk persist.
+  std::map<std::string, std::unique_ptr<MCTSStore>> parkedStoresByKey;
+
+  // Lock-free analyze display double-buffer (writer publishes under state ownership).
+  mutable AnalyzeDisplayPayload analyzeDisplayBuffers[2]{};
+  mutable std::atomic<uint32_t> analyzeDisplayIndex{0};
+  mutable std::atomic<uint64_t> analyzeDisplayRevision{0};
+  mutable std::atomic<uint64_t> analyzeDisplaySeq{0}; // even = stable
+  /// Throttles full ownership copies on the HUD publish path (worker thread only).
+  uint32_t analyzeOwnershipPublishCounter = 0;
+
+  // Single-slot nav intent (latest wins).
+  std::mutex navIntentWriteMutex;
+  std::atomic<uint64_t> navIntentSeq{0};
+  NavIntent navIntentSlot{};
+  std::atomic<uint64_t> navIntentPublished{0};
+  /// Non-zero while FIFO has work — free search aborts the slice so selectEngine starts ASAP.
+  std::atomic<uint32_t> fifoPendingCount{0};
+
+  // Atomic I/O progress (nearly free publish; UI reads without waiting on I/O work).
+  std::atomic<uint64_t> ioUnitsDone{0};
+  std::atomic<uint64_t> ioUnitsTotal{0};
+  std::atomic<uint32_t> ioFractionMillis{0}; // fraction * 1000
+  std::atomic<uint8_t> ioActive{0};
+  // Phase string still under mutex for rare updates; UI primarily uses units.
 
   void setIoProgress(
     bool active,
     const std::string& phase,
     double fraction,
-    uint64_t bytesDone = 0,
-    uint64_t bytesTotal = 0,
+    uint64_t unitsDone = 0,
+    uint64_t unitsTotal = 0,
     const std::string& message = {}
   );
   void clearIoProgress();
+  void publishAnalyzeDisplayLocked();
 
   PendingRequest makePendingRequest(
     RequestKind kind,

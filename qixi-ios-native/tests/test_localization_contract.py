@@ -145,8 +145,9 @@ class LocalizationContractTests(unittest.TestCase):
     expected_uses = {
       "treeMoveNumber": "String(format: text(.treeMoveNumber), ply)",
       "cameraRecognizedStones": "format: L10n.text(.cameraRecognizedStones)",
-      "importLoadedMoves": "String(format: L10n.text(.importLoadedMoves), model.mainLine.count)",
-      "syncLastSynced": "format: L10n.text(.syncLastSynced)",
+      "importLoadedMoves": "String(format: L10n.text(.importLoadedMoves), host.mainLineCount)",
+      # syncLastSynced remains a format string for residual iCloud status plumbing,
+      # but the utility bar no longer renders it after 存档 replaced 同步.
       "engineErrorModelMissing": "String(format: L10n.text(.engineErrorModelMissing), resourceName)",
       "engineErrorInsufficientMemory": "format: L10n.text(.engineErrorInsufficientMemory)",
       "engineErrorUnloadFailed": "fallbackKey: .engineErrorUnloadFailed",

@@ -28,10 +28,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #endif
@@ -83,7 +86,9 @@ std::map<std::string, std::string> qixiNativeKataGoConfigMap(const NativeKataGoM
   std::map<std::string, std::string> values = {
     {"maxVisits", "64"},
     {"numSearchThreads", "1"},
-    {"nnMaxBatchSize", "16"},
+    // Qixi evaluates one leaf at a time (core MCTS). Batch 16 only inflated Metal
+    // input-buffer / handle construction on every model switch.
+    {"nnMaxBatchSize", "1"},
     {"nnCacheSizePowerOfTwo", "-1"},
     {"nnMutexPoolSizePowerOfTwo", "16"},
     {"nnRandomize", "false"},
@@ -91,11 +96,10 @@ std::map<std::string, std::string> qixiNativeKataGoConfigMap(const NativeKataGoM
     {"rootSymmetryPruning", "false"},
     {"wideRootNoise", "0.0"},
     {"conservativePass", "true"},
-    {"numNNServerThreadsPerModel", config.coreMLPackagePaths.empty() ? "2" : "4"},
+    // Single NN server thread: each thread builds a full Metal/MPSGraph (or CoreML)
+    // compute handle. Two threads ≈ 2× model-graph construction on every switch.
+    {"numNNServerThreadsPerModel", "1"},
     {"metalDeviceToUseThread0", "0"},
-    {"metalDeviceToUseThread1", "0"},
-    {"metalDeviceToUseThread2", config.coreMLPackagePaths.empty() ? "0" : "100"},
-    {"metalDeviceToUseThread3", config.coreMLPackagePaths.empty() ? "0" : "100"},
     {"metalUseFP16", "true"},
   };
   values["metalCoreMLPackagePathCount"] = std::to_string(config.coreMLPackagePaths.size());
@@ -299,11 +303,20 @@ public:
   }
 
   NativeKataGoResult unloadModel() override {
+    const auto t0 = std::chrono::steady_clock::now();
     coreEvaluatorImpl.configure(nullptr, nullptr);
-    nnEval.reset();
+    // Tear down Metal/MPSGraph off the selectEngine critical path. Freeing a
+    // 100–300 MB model graph on the worker was observed as multi-second stalls
+    // that users timed as "model switch" even with a tiny MCTS tree.
+    auto doomed = std::move(active);
     loadedEngineID.clear();
     loadedConfig = NativeKataGoModelConfig();
     baseParams = SearchParams();
+    destroyBundleInBackground(std::move(doomed));
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - t0
+    ).count();
+    std::fprintf(stderr, "[qixi-switch] unloadModel_ms=%lld (bg_destroy)\n", static_cast<long long>(ms));
     return nativeOKResult("Native KataGo model unloaded.");
   }
 
@@ -320,29 +333,47 @@ public:
     );
 #endif
 
-    try {
-      qixiInitializeKataGoProcessOnce();
-      unloadModel();
+    // Already on this model — O(1) no-op (avoids full Metal rebuild).
+    if(loadedEngineID == config.engineID && active.nnEval != nullptr) {
+      std::fprintf(stderr, "[qixi-switch] loadModel engine=%s already_loaded skip\n", config.engineID.c_str());
+      return nativeOKResult("Native KataGo model already loaded.");
+    }
 
-      kataGoConfig = std::make_unique<ConfigParser>(qixiNativeKataGoConfigMap(config));
-      logger = std::make_unique<Logger>(kataGoConfig.get(), false, false);
-      logger->setDisabled(true);
+    try {
+      const auto t0 = std::chrono::steady_clock::now();
+      auto msSince = [&](auto t) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - t
+        ).count();
+      };
+      qixiInitializeKataGoProcessOnce();
+
+      // Build the NEW model first while the old one stays resident. UI unlocks
+      // as soon as the new evaluator is wired; old graph free is backgrounded.
+      ModelBundle next;
+      const auto tSetup = std::chrono::steady_clock::now();
+      next.kataGoConfig = std::make_unique<ConfigParser>(qixiNativeKataGoConfigMap(config));
+      next.logger = std::make_unique<Logger>(next.kataGoConfig.get(), false, false);
+      next.logger->setDisabled(true);
       seedRand.init("qixi-native-" + config.engineID);
 
-      Setup::initializeSession(*kataGoConfig);
-      baseParams = Setup::loadSingleParams(*kataGoConfig, Setup::SETUP_FOR_ANALYSIS);
-      // Single-thread NN path; Qixi search is core::MCTSStore, not KataGo Search.
+      Setup::initializeSession(*next.kataGoConfig);
+      next.baseParams = Setup::loadSingleParams(*next.kataGoConfig, Setup::SETUP_FOR_ANALYSIS);
+      const auto setupMs = msSince(tSetup);
+
+      // Single-eval batch; Qixi search is core::MCTSStore, not KataGo Search.
       const int expectedConcurrentEvals = 1;
       const std::string expectedSha256;
-      const int defaultMaxBatchSize = 16;
+      const int defaultMaxBatchSize = 1;
       const bool defaultRequireExactNNLen = false;
       const bool disableFP16 = false;
-      nnEval.reset(Setup::initializeNNEvaluator(
+      const auto tNN = std::chrono::steady_clock::now();
+      next.nnEval.reset(Setup::initializeNNEvaluator(
         config.modelPath,
         config.modelPath,
         expectedSha256,
-        *kataGoConfig,
-        *logger,
+        *next.kataGoConfig,
+        *next.logger,
         seedRand,
         expectedConcurrentEvals,
         NNPos::MAX_BOARD_LEN,
@@ -352,14 +383,32 @@ public:
         disableFP16,
         Setup::SETUP_FOR_ANALYSIS
       ));
+      const auto nnInitMs = msSince(tNN);
 
+      // Swap: detach old, publish new, free old off-thread.
+      coreEvaluatorImpl.configure(nullptr, nullptr);
+      auto doomed = std::move(active);
+      active = std::move(next);
+      baseParams = active.baseParams;
       loadedConfig = config;
       loadedEngineID = config.engineID;
-      coreEvaluatorImpl.configure(nnEval.get(), &baseParams);
+      coreEvaluatorImpl.configure(active.nnEval.get(), &baseParams);
+      destroyBundleInBackground(std::move(doomed));
+
+      std::fprintf(
+        stderr,
+        "[qixi-switch] loadModel engine=%s setup_ms=%lld "
+        "initializeNNEvaluator_ms=%lld total_ms=%lld (old_destroy_bg)\n",
+        config.engineID.c_str(),
+        static_cast<long long>(setupMs),
+        static_cast<long long>(nnInitMs),
+        static_cast<long long>(msSince(t0))
+      );
       return nativeOKResult("Native KataGo model loaded (NN-only; search is core::MCTSStore).");
     }
     catch(const std::exception& ex) {
-      unloadModel();
+      // Leave any previously-active model alone if the new build failed before swap.
+      // If swap already happened this path is not taken (swap is after successful init).
       return nativeInvalidRequestResult(std::string("Native KataGo model load failed: ") + ex.what());
     }
   }
@@ -390,13 +439,36 @@ public:
   }
 
 private:
+  // Own the whole NN stack together so background teardown cannot free Logger
+  // while NNEvaluator still references it.
+  struct ModelBundle {
+    std::unique_ptr<ConfigParser> kataGoConfig;
+    std::unique_ptr<Logger> logger;
+    std::unique_ptr<NNEvaluator> nnEval;
+    SearchParams baseParams;
+  };
+
+  static void destroyBundleInBackground(ModelBundle bundle) {
+    if(bundle.nnEval == nullptr && bundle.logger == nullptr && bundle.kataGoConfig == nullptr)
+      return;
+    std::thread([bundle = std::move(bundle)]() mutable {
+      const auto t0 = std::chrono::steady_clock::now();
+      // Order: evaluator (stops server threads, frees Metal) then logger/config.
+      bundle.nnEval.reset();
+      bundle.logger.reset();
+      bundle.kataGoConfig.reset();
+      const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0
+      ).count();
+      std::fprintf(stderr, "[qixi-switch] bg_destroy_model_ms=%lld\n", static_cast<long long>(ms));
+    }).detach();
+  }
+
   std::string loadedEngineID;
   NativeKataGoModelConfig loadedConfig;
   SearchParams baseParams;
   Rand seedRand;
-  std::unique_ptr<ConfigParser> kataGoConfig;
-  std::unique_ptr<Logger> logger;
-  std::unique_ptr<NNEvaluator> nnEval;
+  ModelBundle active;
   LinkedCoreEvaluator coreEvaluatorImpl;
 };
 

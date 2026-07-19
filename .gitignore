@@ -34,3 +34,11 @@ build/
 /Models/
 KataGo/cpp/build-*/
 KataGo/cpp/tests/results/
+
+# Local build / oracle / IDE noise (keep source history clean for rollback)
+core/build-rt/
+core/oracle/artifacts/
+**/xcuserdata/
+*.o
+*.a
+*.d

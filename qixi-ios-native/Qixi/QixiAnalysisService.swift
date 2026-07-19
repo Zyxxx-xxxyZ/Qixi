@@ -507,6 +507,20 @@ struct QixiCoreLegalMoveMask: Decodable {
 protocol QixiCoreBackendService {
   func submitCoreRequest(_ request: QixiCoreRequest) async throws -> QixiCoreBackendResult
   func latestCoreSnapshot() async throws -> QixiCoreBackendResult
+  /// Plane A: lock-free published revision (no core mutex). Prefer sync for 120 Hz.
+  func publishedAnalyzeRevision() async -> UInt64
+  /// Plane A: lock-free O(1) analyze display POD.
+  func tryLoadAnalyzeDisplay() async -> QixiAnalyzeDisplayPayload?
+  /// Sync lock-free HUD probes (no actor hop / no JSON structure path).
+  func publishedAnalyzeRevisionSync() -> UInt64
+  func tryLoadAnalyzeDisplaySync() -> QixiAnalyzeDisplayPayload?
+  /// Plane B: post play intent (never blocks, not FIFO).
+  func postNavPlay(move: UInt32, uiIntentId: UInt64) async -> Bool
+  /// Plane B: post switchRoot intent (never blocks, not FIFO).
+  func postNavSwitchRoot(nodeId: UInt32, uiIntentId: UInt64) async -> Bool
+  /// Sync Plane B posts — no actor hop on the play hot path (target <100 ms).
+  func postNavPlaySync(move: UInt32, uiIntentId: UInt64) -> Bool
+  func postNavSwitchRootSync(nodeId: UInt32, uiIntentId: UInt64) -> Bool
   func legalMoveMask() async throws -> QixiCoreLegalMoveMask
   func exportCoreState(to url: URL) async throws
   func importCoreState(from url: URL) async throws

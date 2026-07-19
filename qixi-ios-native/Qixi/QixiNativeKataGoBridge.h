@@ -27,6 +27,14 @@ typedef NS_ERROR_ENUM(QixiNativeKataGoErrorDomain, QixiNativeKataGoError) {
 - (BOOL)restoreTombstoneFromFile:(NSString *)filePath error:(NSError **)error;
 - (nullable NSString *)submitCoreRequestJSON:(NSString *)requestJSON error:(NSError **)error;
 - (nullable NSString *)latestCoreSnapshotJSONWithError:(NSError **)error;
+/// Plane A: lock-free published revision (no core mutex).
+- (uint64_t)publishedAnalyzeRevision;
+/// Plane A: lock-free O(1) analyze POD copy, or nil when no stable payload.
+- (nullable NSData *)analyzeDisplayPayloadData;
+/// Plane B: post play intent (move = x+y*19 or 361 pass). Never blocks.
+- (BOOL)postNavPlayMove:(uint32_t)move uiIntentId:(uint64_t)uiIntentId;
+/// Plane B: post switchRoot intent. Never blocks.
+- (BOOL)postNavSwitchRoot:(uint32_t)nodeId uiIntentId:(uint64_t)uiIntentId;
 - (nullable NSString *)coreIoProgressJSONWithError:(NSError **)error;
 - (nullable NSString *)legalMoveMaskJSONWithError:(NSError **)error;
 - (BOOL)exportCoreStateToFile:(NSString *)filePath error:(NSError **)error;

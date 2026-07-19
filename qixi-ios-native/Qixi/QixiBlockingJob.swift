@@ -1,8 +1,7 @@
 import Foundation
-import SwiftUI
 
-/// Long-running work that may block parts of the main-page interaction.
-/// Designed for product-path core I/O (reload, export, engine load) with progress.
+/// Internal bookkeeping for long-running backend work (engine load, I/O, etc.).
+/// Not shown as a main-page modal; product UI stays interactive without progress pop-ups.
 struct QixiBlockingJob: Equatable, Identifiable {
   enum Kind: String, Equatable {
     case restoringState
@@ -50,7 +49,11 @@ struct QixiBlockingJob: Equatable, Identifiable {
     switch kind {
     case .exportingState:
       return [.io, .navigation]
-    case .switchingEngine, .installingModel, .restoringState, .importingState, .memoryUnload, .memoryReload:
+    case .switchingEngine:
+      // Never block the engine strip itself — user must be able to re-pick a model
+      // while a prior load is in flight (supersede). Still pause board play / I/O.
+      return [.navigation, .io]
+    case .installingModel, .restoringState, .importingState, .memoryUnload, .memoryReload:
       return .all
     }
   }
@@ -123,60 +126,5 @@ final class QixiBlockingJobCoordinator: ObservableObject {
     guard let id else { return }
     stack.removeAll { $0.id == id }
     activeJob = stack.last
-  }
-}
-
-/// Main-page progress chrome. Matches the paper / Hermes visual language without
-/// redesigning the analysis workbench layout.
-struct QixiMainPageProgressChrome: View {
-  let job: QixiBlockingJob
-
-  var body: some View {
-    ZStack {
-      QixiColor.background.opacity(0.92).ignoresSafeArea()
-      VStack(spacing: 18) {
-        Text(L10n.text(.onboardingTitle))
-          .font(.system(size: 32, weight: .bold))
-          .foregroundStyle(QixiColor.ink)
-        Text(job.title)
-          .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(QixiColor.ink)
-          .multilineTextAlignment(.center)
-        Group {
-          if let fraction = job.fraction {
-            ProgressView(value: fraction)
-              .tint(QixiColor.hermesBlue)
-              .frame(maxWidth: 280)
-          } else {
-            ProgressView()
-              .controlSize(.large)
-              .tint(QixiColor.hermesBlue)
-          }
-        }
-        .accessibilityLabel(job.phase)
-        Text(job.phase)
-          .font(.system(size: 14, weight: .medium))
-          .foregroundStyle(QixiColor.muted)
-          .multilineTextAlignment(.center)
-        if let detail = job.detail, !detail.isEmpty {
-          Text(detail)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(QixiColor.muted.opacity(0.9))
-            .multilineTextAlignment(.center)
-        }
-      }
-      .padding(28)
-      .frame(maxWidth: 420)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-      .overlay(
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .stroke(QixiColor.separatorStrong, lineWidth: 0.8)
-      )
-      .shadow(color: .black.opacity(0.12), radius: 28, x: 0, y: 18)
-      .padding(.horizontal, 22)
-    }
-    .contentShape(Rectangle())
-    .accessibilityElement(children: .combine)
-    .accessibilityIdentifier("qixi-blocking-job-progress")
   }
 }

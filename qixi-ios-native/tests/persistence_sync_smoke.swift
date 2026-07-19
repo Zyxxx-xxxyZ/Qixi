@@ -34,7 +34,12 @@ struct PersistenceSyncSmoke {
     }
     expect(decoded == original, "snapshot encode/decode preserves semantic state")
     let encodedPayload = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
-    expect(encodedPayload["rootNoise"] == nil, "snapshot JSON excludes nonpersistent root noise")
+    // v2: rootNoise is restorable product state (analysis cache keys depend on it).
+    expect(encodedPayload["rootNoise"] != nil, "snapshot JSON persists rootNoise")
+    expect(
+      abs((encodedPayload["rootNoise"] as? Double ?? -1) - original.rootNoise) < 1e-12,
+      "snapshot JSON encodes the active rootNoise value"
+    )
     var rootNoisePollutedPayload = encodedPayload
     rootNoisePollutedPayload["rootNoise"] = 0.37
     let rootNoisePollutedData = try JSONSerialization.data(withJSONObject: rootNoisePollutedPayload, options: [.sortedKeys])
@@ -42,8 +47,26 @@ struct PersistenceSyncSmoke {
       fail("root-noise-polluted current schema snapshot decoded as nil")
     }
     expect(
-      rootNoisePollutedDecoded == original,
-      "snapshot decode ignores nonpersistent root noise payloads"
+      abs(rootNoisePollutedDecoded.rootNoise - 0.37) < 1e-12,
+      "snapshot decode restores rootNoise from payload"
+    )
+    expect(
+      rootNoisePollutedDecoded != original,
+      "changing rootNoise must change restorable snapshot identity"
+    )
+    // Older v2 writers may omit rootNoise; decode must default it without rejecting the snapshot.
+    var missingRootNoisePayload = encodedPayload
+    missingRootNoisePayload.removeValue(forKey: "rootNoise")
+    let missingRootNoiseData = try JSONSerialization.data(
+      withJSONObject: missingRootNoisePayload,
+      options: [.sortedKeys]
+    )
+    guard let missingRootNoiseDecoded = try QixiSnapshotStore.decode(missingRootNoiseData) else {
+      fail("v2 snapshot without rootNoise field decoded as nil")
+    }
+    expect(
+      abs(missingRootNoiseDecoded.rootNoise - QixiAnalysisLimits.defaultRootNoise) < 1e-12,
+      "missing rootNoise defaults to the product default"
     )
     expect(
       QixiSyncStore.launchSyncEnabled(
@@ -102,6 +125,29 @@ struct PersistenceSyncSmoke {
       QixiSyncStore.visibleMCTSStatePackageRelativePath.hasSuffix(QixiSyncStore.visibleMCTSStatePackageFilename),
       "visible MCTS state package relative path ends with the importable package filename"
     )
+    expect(
+      !QixiSyncStore.syncRelativePath.contains("/Qixi/"),
+      "sync snapshot path is flat under Documents (not nested Documents/Qixi/)"
+    )
+    expect(
+      QixiSyncStore.syncRelativePath.hasPrefix("Documents/"),
+      "sync snapshot path stays under the public Documents folder"
+    )
+    expect(
+      QixiSyncStore.visibleCurrentGameSGFRelativePath.hasSuffix(QixiSyncStore.visibleCurrentGameSGFFilename),
+      "visible current-game SGF relative path ends with the .sgf filename"
+    )
+    let visibleSGFURL = try QixiSyncStore.replaceVisibleCurrentGameSGF(
+      with: "(;FF[4]GM[1]SZ[19]KM[7.5];B[pd];W[dd])"
+    )
+    expect(
+      visibleSGFURL.lastPathComponent == QixiSyncStore.visibleCurrentGameSGFFilename,
+      "sync writes Current Game.sgf at the visible SGF destination"
+    )
+    expect(
+      (try? String(contentsOf: visibleSGFURL, encoding: .utf8))?.contains("B[pd]") == true,
+      "visible current-game SGF contents are readable after replace"
+    )
     let visiblePackageSource = try QixiMCTSStatePackageStore.freshTemporaryPackageURL()
     defer {
       try? FileManager.default.removeItem(at: visiblePackageSource)
@@ -113,7 +159,31 @@ struct PersistenceSyncSmoke {
       to: visiblePackageSource,
       exportedAt: baseDate
     )
+    // Minimal valid PNG header+IHDR is not required here — write paths only.
+    // Use a tiny real PNG generated offline (1x1) so loaders accept the file.
+    let oneByOnePNG = Data(base64Encoded:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )!
+    try QixiMCTSStatePackageStore.writeThumbnailPNG(oneByOnePNG, to: visiblePackageSource)
+    expect(
+      FileManager.default.fileExists(
+        atPath: QixiMCTSStatePackageStore.thumbnailURL(in: visiblePackageSource).path
+      ),
+      "package writes root thumbnail.png for in-app use"
+    )
+    expect(
+      FileManager.default.fileExists(
+        atPath: QixiMCTSStatePackageStore.quickLookThumbnailURL(in: visiblePackageSource).path
+      ),
+      "package writes QuickLook/Thumbnail.png so Files can show a per-document icon"
+    )
     let visiblePackageURL = try QixiSyncStore.replaceVisibleMCTSStatePackage(with: visiblePackageSource)
+    expect(
+      FileManager.default.fileExists(
+        atPath: QixiMCTSStatePackageStore.quickLookThumbnailURL(in: visiblePackageURL).path
+      ),
+      "visible MCTS package copy preserves QuickLook thumbnail"
+    )
     expect(
       visiblePackageURL.lastPathComponent == QixiSyncStore.visibleMCTSStatePackageFilename,
       "sync writes the importable MCTS state package at the visible package destination"
@@ -126,8 +196,8 @@ struct PersistenceSyncSmoke {
     )
     let duplicateTopLevelSnapshotData = dataByReplacingFirst(
       in: encoded,
-      "\"schemaVersion\":1",
-      "\"schemaVersion\":1,\"schemaVersion\":1"
+      "\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion)",
+      "\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion),\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion)"
     )
     expectThrows("snapshot decode rejects duplicate top-level JSON keys") {
       _ = try QixiSnapshotStore.decode(duplicateTopLevelSnapshotData)
@@ -522,11 +592,13 @@ struct PersistenceSyncSmoke {
     let malformedSemanticCacheKeyDecoded = try QixiSnapshotStore.decode(try rawSnapshotData(malformedSemanticCacheKeySnapshot))
     expect(malformedSemanticCacheKeyDecoded == nil, "snapshot decode rejects malformed semantic cache key")
 
+    // Use exact zero root-noise so the bit field is the single hex digit "0" and
+    // leading-zero / overlong mutations are unambiguous regardless of product default.
     let canonicalSemanticCacheKey = QixiPositionIdentity.cacheKey(
       engine: original.selectedEngine,
       moves: originalRootMoves,
       komi: original.komi,
-      rootNoise: QixiAnalysisLimits.defaultRootNoise
+      rootNoise: 0.0
     )
     let leadingZeroBitsCacheKey = canonicalSemanticCacheKey.replacingOccurrences(
       of: "|rootNoiseBits:0|history:",
@@ -2430,8 +2502,8 @@ struct PersistenceSyncSmoke {
     let backupBeforeAmbiguousPrimary = try Data(contentsOf: syncBackupURL)
     let duplicateRemotePrimaryData = dataByReplacingFirst(
       in: backupBeforeAmbiguousPrimary,
-      "\"schemaVersion\":1",
-      "\"schemaVersion\":1,\"schemaVersion\":1"
+      "\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion)",
+      "\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion),\"schemaVersion\":\(QixiAppSnapshot.currentSchemaVersion)"
     )
     try duplicateRemotePrimaryData.write(to: exportResult.snapshotURL, options: [.atomic])
     let ambiguousPrimaryPreferred = try QixiSyncStore.preferredSnapshot(localSnapshot: olderLocal)

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - Board recognition (camera)
 
@@ -7,36 +8,66 @@ import SwiftUI
 protocol QixiBoardRecognitionHost: AnyObject {
   var isBackendInteractionBlocked: Bool { get }
   var lastBoardRecognition: QixiBoardRecognitionResult? { get }
-  func applyBoardRecognition(_ result: QixiBoardRecognitionResult)
+  /// Apply photographed setup stones. `nextPlayer` is who plays the next move at root.
+  func applyBoardRecognition(_ result: QixiBoardRecognitionResult, nextPlayer: StoneColor)
 }
 
-// MARK: - SGF import
+// MARK: - Open
 
 @MainActor
-protocol QixiSGFImportHost: AnyObject {
+protocol QixiOpenSheetHost: AnyObject {
   var isBackendInteractionBlocked: Bool { get }
-  /// Move count after import (for status formatting).
   var mainLineCount: Int { get }
-  func importSGF(text: String) throws
+  func openSGF(text: String) async throws
+  func openMCTSStatePackage(from packageURL: URL, originURL: URL?) async throws
+  /// In-app archive list (local + iCloud `.qixi.png`).
+  func listOpenableArchivePackages() -> [QixiSyncStore.ArchiveListItem]
+  /// Open a list item (may prompt for unsaved changes via host).
+  func openArchiveListItem(_ item: QixiSyncStore.ArchiveListItem) async throws
 }
 
-// MARK: - MCTS package (import sheet)
+// MARK: - Archive
+
+struct QixiArchiveExportOptions: Equatable {
+  var fileName: String
+  var includeSGF: Bool
+  var includeSearchState: Bool
+}
 
 @MainActor
-protocol QixiMCTSPackageHost: AnyObject {
+protocol QixiArchiveSheetHost: AnyObject {
   var isBackendInteractionBlocked: Bool { get }
-  func prepareMCTSStateExportPackage() async throws -> URL
-  func importMCTSStatePackage(from packageURL: URL) async throws
+  /// Suggested name when creating a *new* document (WPS first save).
+  func defaultArchiveFileName() -> String
+  /// True when Save should replace the already-bound document (no rename step).
+  var hasExistingArchiveDocument: Bool { get }
+  /// Display name of the bound document, if any.
+  var currentArchiveDisplayName: String? { get }
+  func boardThumbnailImage(pixelSize: CGFloat) -> UIImage
+  var hasArchivableSearchState: Bool { get }
+  var hasArchivableGameRecord: Bool { get }
+  /// Legacy exporter entry (tests / residual). Prefer `saveArchiveAndSync`.
+  func prepareArchiveExport(options: QixiArchiveExportOptions) async throws -> URL
+  /// WPS save: create with `fileName` when untitled; replace in place when a document is bound.
+  /// Always writes both `.sgf` + `.qixi.png` (local + iCloud when available).
+  func saveArchiveAndSync(fileName: String) async throws
 }
 
-/// Combined host for the import utility sheet (SGF + MCTS package).
-@MainActor
-protocol QixiImportSheetHost: QixiSGFImportHost, QixiMCTSPackageHost {}
+// MARK: - Export & Share
 
-// MARK: - Sync UI + manual sync
+@MainActor
+protocol QixiExportShareHost: AnyObject {
+  var isBackendInteractionBlocked: Bool { get }
+  /// Temporary `.sgf` + `.qixi.png` for Files export / system share sheet.
+  func prepareExportShareFiles() async throws -> [URL]
+}
+
+// MARK: - Sync (internal residual / automation)
 
 @MainActor
 protocol QixiSyncFeatureHost: AnyObject {
+  /// True when the app will prefer the iCloud ubiquity container (availability / automation).
+  /// Not a user-facing setting — iCloud file R/W needs no in-app authorization.
   var iCloudSyncEnabled: Bool { get }
   var syncStatus: QixiSyncStatus { get }
   var isBackendInteractionBlocked: Bool { get }
@@ -51,13 +82,13 @@ protocol QixiSyncFeatureHost: AnyObject {
   func noteSyncResult(_ result: QixiSyncResult)
   func noteSyncMirrorFailure(_ message: String)
   func mirrorVisibleMCTSStatePackageAfterManualSync(result: QixiSyncResult) async throws
-  /// Manual Sync Now (UI / onboarding).
+  func cancelPendingPersistenceSave()
   func syncNow()
 }
 
 // MARK: - Utility sheet router host
 
 @MainActor
-protocol QixiUtilitySheetHost: QixiBoardRecognitionHost, QixiImportSheetHost, QixiSyncFeatureHost, ObservableObject {
+protocol QixiUtilitySheetHost: QixiBoardRecognitionHost, QixiOpenSheetHost, QixiArchiveSheetHost, QixiExportShareHost, QixiSyncFeatureHost, ObservableObject {
   var isBackendInteractionBlocked: Bool { get }
 }

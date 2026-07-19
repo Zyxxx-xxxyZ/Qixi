@@ -15,6 +15,16 @@ enum QixiSGFParser {
     case illegalMove(ply: Int)
   }
 
+  struct ParsedGame: Equatable {
+    var moves: [BoardMove]
+    var setupStones: [BoardSetupStone]
+    var boardSize: Int
+    /// Side to move at the root after setup (from PL, else first move color, else Black).
+    var nextPlayer: StoneColor
+    /// Komi from KM when present and finite.
+    var komi: Double?
+  }
+
   static func loadText(from url: URL) throws -> String {
     try validateImportFileURL(url)
     if let byteCount = try fileByteCount(at: url) {
@@ -32,22 +42,36 @@ enum QixiSGFParser {
     return text
   }
 
+  /// Parses the first top-level game only (collections are common in SGF dumps).
   static func parseMainLineMoves(from text: String) throws -> [BoardMove] {
+    try parseFirstGame(from: text).moves
+  }
+
+  static func parseFirstGame(from text: String) throws -> ParsedGame {
     let scalars = text.unicodeScalars
     var depth = 0
     var index = scalars.startIndex
     var moves: [BoardMove] = []
+    var setupStones: [BoardSetupStone] = []
     var boardSize = 19
+    var plSide: StoneColor?
+    var komi: Double?
+    var sawFirstGameRoot = false
+    var finishedFirstGame = false
 
-    while index < scalars.endIndex {
+    while index < scalars.endIndex, !finishedFirstGame {
       let scalar = scalars[index]
       if scalar == "(" {
         depth += 1
         scalars.formIndex(after: &index)
       } else if scalar == ")" {
+        if depth == 1, sawFirstGameRoot {
+          finishedFirstGame = true
+        }
         depth = max(0, depth - 1)
         scalars.formIndex(after: &index)
       } else if depth == 1 && scalar == ";" {
+        sawFirstGameRoot = true
         scalars.formIndex(after: &index)
         while index < scalars.endIndex {
           if scalars[index] == ";" || scalars[index] == "(" || scalars[index] == ")" { break }
@@ -67,6 +91,31 @@ enum QixiSGFParser {
           if property == "SZ", let value = values.first, let parsed = Int(value) {
             boardSize = parsed
           }
+          if property == "PL", let value = values.first {
+            let upper = value.uppercased()
+            if upper == "W" || upper == "WHITE" {
+              plSide = .white
+            } else if upper == "B" || upper == "BLACK" {
+              plSide = .black
+            }
+          }
+          if property == "KM", let value = values.first {
+            // Accept "7.5" / "6,5" style decimals.
+            let normalized = value.replacingOccurrences(of: ",", with: ".")
+            if let parsed = Double(normalized), parsed.isFinite {
+              komi = parsed
+            }
+          }
+          if property == "AB" || property == "AW" {
+            let color: StoneColor = property == "AB" ? .black : .white
+            for value in values {
+              let stoneMove = try move(color: color, value: value, boardSize: boardSize)
+              guard !stoneMove.isPass, let x = stoneMove.x, let y = stoneMove.y else {
+                throw ParseError.invalidCoordinate
+              }
+              setupStones.append(BoardSetupStone(color: color, x: x, y: y))
+            }
+          }
           if property == "B" || property == "W", let value = values.first {
             let color: StoneColor = property == "B" ? .black : .white
             moves.append(try move(color: color, value: value, boardSize: boardSize))
@@ -76,16 +125,70 @@ enum QixiSGFParser {
         scalars.formIndex(after: &index)
       }
     }
-    return moves
+    let nextPlayer = plSide ?? moves.first?.color ?? .black
+    return ParsedGame(
+      moves: moves,
+      setupStones: setupStones,
+      boardSize: boardSize,
+      nextPlayer: nextPlayer,
+      komi: komi
+    )
   }
 
   static func parseValidatedMainLineMoves(from text: String) throws -> [BoardMove] {
-    let moves = try parseMainLineMoves(from: text)
-    guard !moves.isEmpty else { throw ParseError.noMoves }
-    if let illegalIndex = QixiBoardPosition.firstIllegalMoveIndex(in: moves) {
+    try parseValidatedGame(from: text).moves
+  }
+
+  /// FF[4] main-line export (setup stones + moves only; no variations).
+  static func exportGame(
+    moves: [BoardMove],
+    setupStones: [BoardSetupStone] = [],
+    komi: Double,
+    nextPlayer: StoneColor,
+    boardSize: Int = QixiBoardPosition.boardSize
+  ) -> String {
+    var output = "(;FF[4]GM[1]CA[UTF-8]AP[Qixi:1.0]"
+    output += "SZ[\(boardSize)]"
+    output += "KM[\(formatKomi(komi))]"
+    output += "RU[\(QixiRules.fixedRules)]"
+    // PL is meaningful when root side-to-move is not implied by the first move color.
+    if moves.first?.color != nextPlayer || moves.isEmpty {
+      output += "PL[\(nextPlayer.rawValue)]"
+    }
+    let blacks = setupStones.filter { $0.color == .black }.map { sgfCoordinate(x: $0.x, y: $0.y) }
+    let whites = setupStones.filter { $0.color == .white }.map { sgfCoordinate(x: $0.x, y: $0.y) }
+    if !blacks.isEmpty {
+      output += "AB" + blacks.map { "[\($0)]" }.joined()
+    }
+    if !whites.isEmpty {
+      output += "AW" + whites.map { "[\($0)]" }.joined()
+    }
+    for move in moves {
+      let prop = move.color.rawValue
+      if move.isPass {
+        output += ";\(prop)[]"
+      } else if let x = move.x, let y = move.y {
+        output += ";\(prop)[\(sgfCoordinate(x: x, y: y))]"
+      }
+    }
+    output += ")"
+    return output
+  }
+
+  /// Validated first game including setup stones (AB/AW).
+  static func parseValidatedGame(from text: String) throws -> ParsedGame {
+    let game = try parseFirstGame(from: text)
+    guard !game.moves.isEmpty || !game.setupStones.isEmpty else { throw ParseError.noMoves }
+    if let invalidSetup = QixiBoardPosition.firstInvalidSetupStoneIndex(in: game.setupStones) {
+      throw ParseError.illegalMove(ply: invalidSetup + 1)
+    }
+    if let illegalIndex = QixiBoardPosition.firstIllegalMoveIndex(
+      in: game.moves,
+      setupStones: game.setupStones
+    ) {
       throw ParseError.illegalMove(ply: illegalIndex + 1)
     }
-    return moves
+    return game
   }
 
   private static func move(color: StoneColor, value: String, boardSize: Int) throws -> BoardMove {
@@ -105,6 +208,31 @@ enum QixiSGFParser {
       throw ParseError.invalidCoordinate
     }
     return BoardMove(color: color, x: x, y: y)
+  }
+
+  private static func sgfCoordinate(x: Int, y: Int) -> String {
+    let a = Int(UnicodeScalar("a").value)
+    let xScalar = UnicodeScalar(a + x) ?? "a"
+    let yScalar = UnicodeScalar(a + y) ?? "a"
+    return String(String.UnicodeScalarView([xScalar, yScalar]))
+  }
+
+  private static func formatKomi(_ value: Double) -> String {
+    if value.truncatingRemainder(dividingBy: 1) == 0 {
+      return String(Int(value))
+    }
+    // Prefer a stable decimal form without scientific notation.
+    var text = String(value)
+    if text.contains("e") || text.contains("E") {
+      text = String(format: "%.10f", value)
+      while text.contains("."), text.hasSuffix("0") {
+        text.removeLast()
+      }
+      if text.hasSuffix(".") {
+        text.removeLast()
+      }
+    }
+    return text
   }
 
   private static func readPropertyValues(

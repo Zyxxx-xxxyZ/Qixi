@@ -149,6 +149,39 @@ struct RootSnapshot {
   bool hasOwnership = false;
 };
 
+/// Fixed-size lock-free UI analyze plane (O(1): K candidates + 361 ownership).
+/// Product displays at most 10 move candidates on the board.
+constexpr size_t kAnalyzeDisplayMaxCandidates = 10;
+
+#pragma pack(push, 1)
+struct AnalyzeDisplayCandidate {
+  uint16_t move = static_cast<uint16_t>(kMovePass);
+  uint32_t visits = 0;
+  float winrate = 0.0f;
+  float scoreMean = 0.0f;
+};
+
+struct AnalyzeDisplayPayload {
+  uint64_t backendEpoch = 0;
+  uint64_t revision = 0;
+  uint32_t root = kInvalidNode;
+  uint32_t candidateCount = 0;
+  uint64_t rootVisits = 0;
+  float rootWinrate = 0.5f;
+  float rootScoreMean = 0.0f;
+  AnalyzeDisplayCandidate candidates[kAnalyzeDisplayMaxCandidates]{};
+  float ownership[kOwnershipDim]{};
+  uint8_t hasOwnership = 0;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(AnalyzeDisplayCandidate) == 14, "packed candidate layout");
+static_assert(
+  sizeof(AnalyzeDisplayPayload) ==
+    8 + 8 + 4 + 4 + 8 + 4 + 4 + 14 * kAnalyzeDisplayMaxCandidates + 4 * kOwnershipDim + 1,
+  "packed analyze display layout"
+);
+
 struct StoreMemoryStats {
   uint64_t nodeCount = 0;
   uint64_t actionCount = 0;
@@ -203,6 +236,8 @@ public:
   const AnalysisKey& analysisKey() const;
   const SearchParams& searchParams() const;
   void assignImportedGameId(GameId gameId);
+  /// O(1) model rekey for fast engine switch — does not clone or free the tree.
+  void rekeyModelId(ModelId modelId);
   void setEvaluator(Evaluator* evaluator);
 
   // Production default is always TreeSelectionMode::puct.
@@ -235,8 +270,15 @@ public:
   // Bounded snapshot for high-frequency UI polls. Caps candidates and visibleTree size;
   // always includes the current root lineage chain when possible.
   RootSnapshot snapshotLight(
-    size_t maxCandidates = 32,
+    size_t maxCandidates = 10,
     size_t maxVisibleNodes = 4096,
+    bool includeOwnership = true
+  ) const;
+  /// O(1) display fill: root metrics + top-K candidates + optional ownership[361].
+  /// Does not walk visibleTree. maxCandidates is capped at kAnalyzeDisplayMaxCandidates.
+  void fillAnalyzeDisplay(
+    AnalyzeDisplayPayload& out,
+    size_t maxCandidates = kAnalyzeDisplayMaxCandidates,
     bool includeOwnership = true
   ) const;
   StoreMemoryStats memoryStats() const;
@@ -246,13 +288,23 @@ public:
     const SearchParams& searchParams,
     std::string* error
   ) const;
+  /// Fast model-switch helper: only the path from game root to current root (O(ply)),
+  /// not the full visible variation tree.
+  MCTSStore cloneCurrentRootPath(
+    const Rules& rules,
+    const AnalysisKey& analysisKey,
+    const SearchParams& searchParams,
+    std::string* error
+  ) const;
   bool mergeVisibleRecordFrom(const MCTSStore& source, std::string* error);
 
   std::vector<uint8_t> serialize() const;
 
-  /// Progress for long deserialize / file load. `fraction` is overall 0..1.
-  /// `phase` is a stable token: reading | verifying | parsing_header |
-  /// parsing_nodes | parsing_actions | parsing_arenas | validating | complete.
+  /// One-shot durable write for OOM unload / checkpoint: serialize once, atomic replace once.
+  /// Does not stream progress and does not write nodes as separate records.
+  bool persistToFile(const std::string& path, std::string* error) const;
+
+  /// Progress callback kept for optional diagnostics only; product unload/reload never uses it.
   struct DeserializeProgress {
     std::string phase;
     double fraction = 0.0;
@@ -273,7 +325,14 @@ public:
     std::string* error,
     const DeserializeProgressFn& progress = {}
   );
-  /// Stream-friendly file load: chunked read or mmap, with true read/verify/parse progress.
+  /// One-shot file load for OOM rehydrate: mmap/read the whole blob once, parse once.
+  /// No streaming progress. Prefer this over any multi-pass or chunk-progress path.
+  static std::optional<MCTSStore> loadFromFile(
+    const std::string& path,
+    uint64_t maxBytes,
+    std::string* error
+  );
+  /// Alias of loadFromFile (progress argument is ignored; kept for call-site compatibility).
   static std::optional<MCTSStore> deserializeFromFile(
     const std::string& path,
     uint64_t maxBytes,
@@ -320,7 +379,10 @@ private:
   std::vector<uint8_t> visible;
   std::unordered_map<uint64_t, NodeId> visibleLineageIndex;
   NodeId root = kInvalidNode;
-  BoardState rootBoardState;
+  /// Current root board (shared_ptr for O(1) switchRoot install).
+  std::shared_ptr<const BoardState> rootBoardPtr;
+  /// Per-node board cache for O(1) switchRoot. Runtime-only.
+  std::vector<std::shared_ptr<const BoardState>> boardCacheByNode;
   uint64_t playoutSeq = 0;
   uint64_t rootSessionSeq = 0;
   Evaluator* evaluator = nullptr;
@@ -331,6 +393,9 @@ private:
   static uint64_t childLineageHash(uint64_t parentHash, Move move, Color pla);
   NodeId createInitialNode();
   NodeId createChildLink(NodeId parent, Move move, const BoardState& childBoard);
+  void storeBoardCache(NodeId node, BoardState board);
+  std::shared_ptr<const BoardState> boardCacheFor(NodeId node) const;
+  std::shared_ptr<const BoardState> ensureBoardCache(NodeId node);
   std::optional<BoardState> materializePosition(NodeId node) const;
   ActionId findAction(NodeId parent, Move move) const;
   ActionId getOrCreateAction(NodeId parent, Move move);
@@ -355,6 +420,14 @@ private:
   static void updateScalarStats(ScalarStats& stats, const LeafPayload& leaf, float utility, float weight);
   float displayWinrate(const ScalarStats& stats, Color pla) const;
   float displayScoreMean(const ScalarStats& stats, Color pla) const;
+  /// Quality of `playedMove` vs peers at `parent` (side-to-move polarity).
+  /// Extreme-low (STM ≤ 5%): score-loss scale; else winrate-loss percentage points.
+  /// Returns false when the played move has no visited peer baseline.
+  bool qualityDeltaPercentForParentAction(
+    const Node& parent,
+    Move playedMove,
+    float& outQualityDeltaPercent
+  ) const;
 };
 
 } // namespace qixi::core

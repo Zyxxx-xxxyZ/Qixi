@@ -49,7 +49,8 @@ struct QixiBoardImageSelection: Equatable {
 enum QixiBoardImageRecognizer {
   static let maxInputImageBytes: UInt64 = 32 * 1024 * 1024
   private static let maximumDecodePixelSize = 1600
-  private static let maximumLocatorPixelSize = 700
+  /// Higher than the old 700px cap so thin platform grid lines survive downscale.
+  private static let maximumLocatorPixelSize = 1200
 
   private enum StoneClassificationMode {
     case automatic
@@ -280,7 +281,9 @@ enum QixiBoardImageRecognizer {
   static func suggestedSelection(from image: CGImage) throws -> QixiBoardImageSelection {
     let locatorImage = try downscaledImageForBoardLocator(image)
     let raster = try Raster(image: locatorImage)
-    guard let quad = estimateGridSearchBoardQuad(in: raster) ??
+    // Prefer outermost 19×19 grid-line intersections (general geometry), then legacy fall-backs.
+    guard let quad = estimateOuterGridIntersectionQuad(in: raster) ??
+      estimateGridSearchBoardQuad(in: raster) ??
       estimateWarmBoardQuad(in: raster) ??
       estimateBoardQuad(in: raster) else {
       return .defaultGrid
@@ -843,6 +846,419 @@ enum QixiBoardImageRecognizer {
     }
   }
 
+  /// Locate the outermost 19×19 grid intersections via dark ridge projections + regular 19-line fit.
+  /// General geometry (no image-specific hardcoding). Works best on near-axis-aligned platform boards.
+  private static func estimateOuterGridIntersectionQuad(in raster: Raster) -> BoardQuad? {
+    let fields = makeLocatorFields(from: raster)
+    let width = fields.width
+    let height = fields.height
+    let components = boardColorComponents(
+      mask: fields.strictBoardMask,
+      width: width,
+      height: height
+    )
+    // Score each large component separately (avoids dual-board merge mistakes).
+    var candidates = components.filter { component in
+      component.width > max(60, width / 8) && component.height > max(60, height / 8)
+    }
+    if candidates.isEmpty {
+      candidates = components.prefix(3).map { $0 }
+    }
+    // Full-frame fallback when wood segmentation is weak.
+    candidates.append(
+      ColorComponent(count: width * height / 4, minX: 1, minY: 1, maxX: width - 2, maxY: height - 2)
+    )
+
+    var best: (score: Double, quad: BoardQuad)?
+    for component in candidates.prefix(10) {
+      let bw = component.width
+      let bh = component.height
+      let aspect = Double(bw) / Double(max(1, bh))
+      guard aspect > 0.4, aspect < 2.5 else { continue }
+
+      let x0 = component.minX
+      let x1 = component.maxX
+      let y0 = component.minY
+      let y1 = component.maxY
+      let (verticalScore, horizontalScore) = darkRidgeProjections(
+        fields: fields,
+        x0: x0,
+        x1: x1,
+        y0: y0,
+        y1: y1
+      )
+      guard x0 <= x1, y0 <= y1,
+            x0 >= 0, x1 < verticalScore.count,
+            y0 >= 0, y1 < horizontalScore.count else {
+        continue
+      }
+      let vMax = verticalScore[x0...x1].max() ?? 0.0
+      let hMax = horizontalScore[y0...y1].max() ?? 0.0
+      guard vMax > 1.0, hMax > 1.0 else {
+        continue
+      }
+
+      let minDistX = max(3, bw / 42)
+      let minDistY = max(3, bh / 42)
+      let xPeaks = projectionPeaks(verticalScore, lo: x0, hi: x1, minDist: minDistX, thrFraction: 0.10)
+      let yPeaks = projectionPeaks(horizontalScore, lo: y0, hi: y1, minDist: minDistY, thrFraction: 0.10)
+      guard let xFit = fitNineteenLineSpan(scores: verticalScore, lo: x0, hi: x1, peaks: xPeaks),
+            let yFit = fitNineteenLineSpan(scores: horizontalScore, lo: y0, hi: y1, peaks: yPeaks) else {
+        continue
+      }
+
+      let left = xFit.first
+      let right = xFit.last
+      let top = yFit.first
+      let bottom = yFit.last
+      let spanW = right - left
+      let spanH = bottom - top
+      guard spanW > Double(width) * 0.08, spanH > Double(height) * 0.08 else { continue }
+      let areaFraction = (spanW * spanH) / Double(width * height)
+      guard areaFraction >= 0.06, areaFraction <= 0.88 else { continue }
+
+      var score = (xFit.averageEnergy / (vMax + 1e-6)) + (yFit.averageEnergy / (hMax + 1e-6))
+      // Prefer real game boards (stones) over pale ghost analysis panels.
+      let stoneDensity = stoneDensityInRect(
+        fields: fields,
+        left: left,
+        top: top,
+        right: right,
+        bottom: bottom
+      )
+      score += 2.2 * stoneDensity
+      let woodDensity = woodDensityInRect(
+        fields: fields,
+        left: left,
+        top: top,
+        right: right,
+        bottom: bottom
+      )
+      score += 0.65 * woodDensity
+      // Prefer covering most of the wood component (outer grid, not inset subgrid).
+      let componentCoverage =
+        (spanW / Double(max(1, bw))) * (spanH / Double(max(1, bh)))
+      score += 0.55 * componentCoverage
+      let boardAspect = spanW / max(1e-6, spanH)
+      score -= abs(log(boardAspect)) * 1.05
+      if areaFraction > 0.85 { score -= 0.7 }
+      if areaFraction < 0.10 { score -= 0.4 }
+
+      let quad = BoardQuad(
+        topLeft: CGPoint(x: left, y: top),
+        topRight: CGPoint(x: right, y: top),
+        bottomRight: CGPoint(x: right, y: bottom),
+        bottomLeft: CGPoint(x: left, y: bottom)
+      )
+      if best == nil || score > best!.score {
+        best = (score, quad)
+      }
+    }
+
+    guard let best, best.score > 0.35 else { return nil }
+    return best.quad
+  }
+
+  private static func darkRidgeProjections(
+    fields: LocatorFields,
+    x0: Int,
+    x1: Int,
+    y0: Int,
+    y1: Int
+  ) -> (vertical: [Double], horizontal: [Double]) {
+    let width = fields.width
+    let height = fields.height
+    var vertical = [Double](repeating: 0.0, count: width)
+    var horizontal = [Double](repeating: 0.0, count: height)
+    let xStart = max(1, x0)
+    let xEnd = min(width - 2, x1)
+    let yStart = max(1, y0)
+    let yEnd = min(height - 2, y1)
+    guard xStart <= xEnd, yStart <= yEnd else { return (vertical, horizontal) }
+
+    for x in xStart...xEnd {
+      var total = 0.0
+      for y in yStart...yEnd {
+        let index = y * width + x
+        guard fields.strictBoardMask[index] || fields.tanScore[index] > 0.08 else { continue }
+        let center = fields.luma[index]
+        guard center > 40.0, center < 225.0 else { continue }
+        let left = fields.luma[index - 1]
+        let right = fields.luma[index + 1]
+        let ridge = max(0.0, 0.5 * (left + right) - center)
+        total += ridge
+      }
+      vertical[x] = total
+    }
+    for y in yStart...yEnd {
+      var total = 0.0
+      for x in xStart...xEnd {
+        let index = y * width + x
+        guard fields.strictBoardMask[index] || fields.tanScore[index] > 0.08 else { continue }
+        let center = fields.luma[index]
+        guard center > 40.0, center < 225.0 else { continue }
+        let up = fields.luma[index - width]
+        let down = fields.luma[index + width]
+        let ridge = max(0.0, 0.5 * (up + down) - center)
+        total += ridge
+      }
+      horizontal[y] = total
+    }
+    return (smooth1D(vertical, radius: 1), smooth1D(horizontal, radius: 1))
+  }
+
+  private static func smooth1D(_ values: [Double], radius: Int) -> [Double] {
+    guard radius > 0, !values.isEmpty else { return values }
+    var output = values
+    let kernel = Double(radius * 2 + 1)
+    for index in values.indices {
+      var sum = 0.0
+      var count = 0.0
+      for offset in -radius...radius {
+        let j = index + offset
+        if j >= 0, j < values.count {
+          sum += values[j]
+          count += 1.0
+        }
+      }
+      output[index] = count > 0 ? sum / count : values[index]
+      _ = kernel
+    }
+    return output
+  }
+
+  private static func projectionPeaks(
+    _ scores: [Double],
+    lo: Int,
+    hi: Int,
+    minDist: Int,
+    thrFraction: Double
+  ) -> [Int] {
+    let lo = max(0, lo)
+    let hi = min(scores.count - 1, hi)
+    guard lo <= hi, !scores.isEmpty else { return [] }
+    let slice = scores[lo...hi]
+    guard let maxValue = slice.max(), maxValue > 0 else { return [] }
+    let threshold = maxValue * thrFraction
+    var peaks: [Int] = []
+    var index = lo
+    while index <= hi {
+      if scores[index] >= threshold {
+        var end = index
+        while end + 1 <= hi, scores[end + 1] >= threshold * 0.25 {
+          end += 1
+        }
+        var peak = index
+        var peakValue = scores[index]
+        for cursor in index...end where scores[cursor] > peakValue {
+          peak = cursor
+          peakValue = scores[cursor]
+        }
+        peaks.append(peak)
+        index = max(end + 1, peak + minDist)
+      } else {
+        index += 1
+      }
+    }
+    var suppressed: [Int] = []
+    for peak in peaks {
+      if suppressed.isEmpty || peak - suppressed[suppressed.count - 1] >= minDist {
+        suppressed.append(peak)
+      } else if scores[peak] > scores[suppressed[suppressed.count - 1]] {
+        suppressed[suppressed.count - 1] = peak
+      }
+    }
+    return suppressed
+  }
+
+  private struct NineteenLineFit {
+    var first: Double
+    var last: Double
+    var step: Double
+    var averageEnergy: Double
+  }
+
+  private static func fitNineteenLineSpan(
+    scores: [Double],
+    lo: Int,
+    hi: Int,
+    peaks: [Int]
+  ) -> NineteenLineFit? {
+    var candidates: [NineteenLineFit] = []
+    let roiSpan = max(1.0, Double(hi - lo))
+
+    func consider(first: Double, last: Double, step: Double, energy: Double, cost: Double, lineCount: Int) {
+      guard last > first, step >= 3.0 else { return }
+      let average = energy / Double(max(1, lineCount))
+      // Coverage of the board-wood ROI — prefer outermost lines, not an inset subgrid.
+      let coverage = min(1.0, max(0.0, (last - first) / roiSpan))
+      var rank = average * (0.55 + 0.45 * coverage) - cost / Double(max(1, lineCount))
+      if lineCount == 19 { rank += average * 0.12 }
+      // Mild absolute span preference (full board > partial).
+      rank += (last - first) / roiSpan * average * 0.15
+      candidates.append(
+        NineteenLineFit(first: first, last: last, step: step, averageEnergy: rank)
+      )
+    }
+
+    // Peak-regularized spans: reconstruct exactly 19 lines over [peaks[i], peaks[j]].
+    if peaks.count >= 14 {
+      for i in 0..<peaks.count {
+        let jStart = i + 13
+        guard jStart < peaks.count else { break }
+        for j in jStart..<peaks.count {
+          let span = Double(peaks[j] - peaks[i])
+          guard span > 0 else { continue }
+          // Always evaluate as a 19-line board grid over this span.
+          let step19 = span / 18.0
+          guard step19 >= 3.0 else { continue }
+          var energy = 0.0
+          var cost = 0.0
+          for k in 0..<19 {
+            let expected = Double(peaks[i]) + Double(k) * step19
+            energy += localScoreMax(scores, at: expected)
+            if let nearest = peaks.min(by: { abs(Double($0) - expected) < abs(Double($1) - expected) }) {
+              cost += abs(Double(nearest) - expected)
+            }
+          }
+          consider(
+            first: Double(peaks[i]),
+            last: Double(peaks[j]),
+            step: step19,
+            energy: energy,
+            cost: cost,
+            lineCount: 19
+          )
+        }
+      }
+    }
+
+    // Energy maximization over origin/step (helps when outer ridges are weak).
+    var stepSeeds: [Double] = []
+    if peaks.count >= 6 {
+      let gaps = zip(peaks.dropFirst(), peaks).map { Double($0 - $1) }
+      let median = gaps.sorted()[gaps.count / 2]
+      let good = gaps.filter { $0 > median * 0.55 && $0 < median * 1.55 }
+      if !good.isEmpty {
+        stepSeeds.append(good.sorted()[good.count / 2])
+      }
+    }
+    if peaks.count >= 10 {
+      stepSeeds.append(Double(peaks[peaks.count - 1] - peaks[0]) / 18.0)
+    }
+    // Prefer grids that nearly fill the wood ROI.
+    stepSeeds.append(roiSpan / 18.0)
+    stepSeeds.append(roiSpan / 17.0)
+    stepSeeds.append(roiSpan / 19.0)
+
+    for seed in stepSeeds where seed >= 3.0 {
+      var step = seed * 0.88
+      while step <= seed * 1.12 + 1e-9 {
+        let originStart = Double(lo) - 0.35 * step
+        let originEnd = Double(hi) - 17.4 * step
+        guard originEnd > originStart else {
+          step += seed * 0.02
+          continue
+        }
+        let originSteps = 40
+        for originIndex in 0...originSteps {
+          let t = Double(originIndex) / Double(originSteps)
+          let origin = originStart + (originEnd - originStart) * t
+          let last = origin + 18.0 * step
+          var energy = 0.0
+          var inside = 0
+          for k in 0..<19 {
+            let position = origin + Double(k) * step
+            if position >= Double(lo) - 0.45 * step, position <= Double(hi) + 0.45 * step {
+              inside += 1
+            }
+            energy += localScoreMax(scores, at: position)
+          }
+          guard inside >= 16 else { continue }
+          consider(first: origin, last: last, step: step, energy: energy, cost: 0.0, lineCount: 19)
+        }
+        step += seed * 0.02
+      }
+    }
+
+    return candidates.max(by: { $0.averageEnergy < $1.averageEnergy })
+  }
+
+  private static func localScoreMax(_ scores: [Double], at position: Double) -> Double {
+    guard !scores.isEmpty else { return 0.0 }
+    let index = Int(position.rounded())
+    let lo = max(0, min(scores.count - 1, index - 1))
+    let hi = max(0, min(scores.count - 1, index + 1))
+    guard lo <= hi else { return 0.0 }
+    var best = 0.0
+    for cursor in lo...hi {
+      best = max(best, scores[cursor])
+    }
+    return best
+  }
+
+  private static func stoneDensityInRect(
+    fields: LocatorFields,
+    left: Double,
+    top: Double,
+    right: Double,
+    bottom: Double
+  ) -> Double {
+    let x0 = max(0, Int(floor(left)))
+    let x1 = min(fields.width - 1, Int(ceil(right)))
+    let y0 = max(0, Int(floor(top)))
+    let y1 = min(fields.height - 1, Int(ceil(bottom)))
+    guard x0 <= x1, y0 <= y1 else { return 0.0 }
+    var dark = 0
+    var total = 0
+    // Sparse sampling for speed.
+    let step = max(1, min(x1 - x0, y1 - y0) / 80)
+    var y = y0
+    while y <= y1 {
+      var x = x0
+      while x <= x1 {
+        total += 1
+        if fields.luma[y * fields.width + x] < 88.0 {
+          dark += 1
+        }
+        x += step
+      }
+      y += step
+    }
+    return total > 0 ? Double(dark) / Double(total) : 0.0
+  }
+
+  private static func woodDensityInRect(
+    fields: LocatorFields,
+    left: Double,
+    top: Double,
+    right: Double,
+    bottom: Double
+  ) -> Double {
+    let x0 = max(0, Int(floor(left)))
+    let x1 = min(fields.width - 1, Int(ceil(right)))
+    let y0 = max(0, Int(floor(top)))
+    let y1 = min(fields.height - 1, Int(ceil(bottom)))
+    guard x0 <= x1, y0 <= y1 else { return 0.0 }
+    var wood = 0
+    var total = 0
+    let step = max(1, min(x1 - x0, y1 - y0) / 80)
+    var y = y0
+    while y <= y1 {
+      var x = x0
+      while x <= x1 {
+        total += 1
+        let index = y * fields.width + x
+        if fields.strictBoardMask[index] || fields.tanScore[index] > 0.12 {
+          wood += 1
+        }
+        x += step
+      }
+      y += step
+    }
+    return total > 0 ? Double(wood) / Double(total) : 0.0
+  }
+
   private static func estimateGridSearchBoardQuad(in raster: Raster) -> BoardQuad? {
     let fields = makeLocatorFields(from: raster)
     let components = boardColorComponents(
@@ -951,20 +1367,22 @@ enum QixiBoardImageRecognizer {
           clamp((green - blue) / 80.0, lower: 0.0, upper: 1.0) *
           clamp((215.0 - pixelLuma) / 95.0, lower: 0.0, upper: 1.0) *
           clamp((pixelLuma - 45.0) / 90.0, lower: 0.0, upper: 1.0)
+        // Warm board wood — includes light platform screenshots (luma often 180–220).
         strictMask[index] =
-          red > 75.0 &&
-          green > 55.0 &&
-          blue > 25.0 &&
-          red > green * 1.03 &&
-          green > blue * 1.18 &&
-          red > blue * 1.45 &&
-          red - green > 5.0 &&
-          red - green < 80.0 &&
-          green - blue > 12.0 &&
-          green - blue < 95.0 &&
-          saturation > 0.20 &&
-          pixelLuma > 70.0 &&
-          pixelLuma < 180.0
+          red > 70.0 &&
+          green > 50.0 &&
+          blue > 20.0 &&
+          red > green * 0.92 &&
+          green > blue * 1.02 &&
+          red > blue * 1.15 &&
+          red - green > 2.0 &&
+          red - green < 100.0 &&
+          green - blue > 4.0 &&
+          green - blue < 110.0 &&
+          saturation > 0.10 &&
+          saturation < 0.62 &&
+          pixelLuma > 60.0 &&
+          pixelLuma < 235.0
       }
     }
 
@@ -1059,6 +1477,9 @@ enum QixiBoardImageRecognizer {
     let baseHeight = Double(max(1, base.height))
     let baseWidth = Double(max(1, base.width))
     for component in components.dropFirst() {
+      // Do not glue dual side-by-side boards (e.g. main board + ghost analysis panel).
+      let horizontalGap = max(0, max(component.minX, merged.minX) - min(component.maxX, merged.maxX))
+      if horizontalGap > Int(baseWidth * 0.08) { continue }
       let overlap = max(0, min(merged.maxX, component.maxX) - max(merged.minX, component.minX) + 1)
       let overlapFraction = Double(overlap) / Double(max(1, min(base.width, component.width)))
       let componentMinY = Double(component.minY)
@@ -1131,11 +1552,12 @@ enum QixiBoardImageRecognizer {
   ) -> Double {
     guard quadIsInsideBounds(quad, bounds),
           quadrilateralArea(quad) >= Double(fields.width * fields.height) * 0.03,
-          quadrilateralArea(quad) <= Double(fields.width * fields.height) * 0.45,
-          Double(quad.topRight.x - quad.topLeft.x) > Double(fields.width) * 0.22,
-          Double(quad.bottomRight.x - quad.bottomLeft.x) > Double(fields.width) * 0.22,
-          Double(quad.bottomLeft.y - quad.topLeft.y) > Double(fields.height) * 0.12,
-          Double(quad.bottomRight.y - quad.topRight.y) > Double(fields.height) * 0.12 else {
+          // Full-frame platform boards often exceed 45% of the screenshot.
+          quadrilateralArea(quad) <= Double(fields.width * fields.height) * 0.88,
+          Double(quad.topRight.x - quad.topLeft.x) > Double(fields.width) * 0.18,
+          Double(quad.bottomRight.x - quad.bottomLeft.x) > Double(fields.width) * 0.18,
+          Double(quad.bottomLeft.y - quad.topLeft.y) > Double(fields.height) * 0.10,
+          Double(quad.bottomRight.y - quad.topRight.y) > Double(fields.height) * 0.10 else {
       return -Double.infinity
     }
 

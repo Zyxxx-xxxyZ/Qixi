@@ -139,8 +139,14 @@ public:
   NativeKataGoResult exportTombstoneToFile(const std::string& filePath);
   NativeKataGoResult restoreTombstoneFromFile(const std::string& filePath);
   NativeKataGoResult submitCoreRequestJSON(const std::string& requestJSON);
-  // Bounded snapshot for high-frequency UI polls (candidates + capped variation tree).
+  // Bounded snapshot for structure path (variation tree); not the 120 Hz HUD path.
   NativeKataGoResult latestCoreSnapshotJSON();
+  // Plane A: lock-free analyze display (O(1) POD, no mutex).
+  uint64_t publishedAnalyzeRevision() const;
+  bool tryLoadAnalyzeDisplay(core::AnalyzeDisplayPayload& out) const;
+  // Plane B: single-slot nav intent (no FIFO, no UI lock).
+  bool postNavPlay(uint32_t move, uint64_t uiIntentId);
+  bool postNavSwitchRoot(uint32_t nodeId, uint64_t uiIntentId);
   NativeKataGoResult coreIoProgressJSON();
   NativeKataGoResult legalMoveMaskJSON();
   NativeKataGoResult exportCoreStateToFile(const std::string& filePath);

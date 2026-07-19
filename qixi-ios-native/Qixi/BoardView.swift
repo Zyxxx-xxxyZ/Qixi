@@ -10,7 +10,7 @@ struct BoardView: View {
         BoardBackgroundCanvas()
           .frame(width: side, height: side)
 
-        TerritoryCanvas(model: model)
+        TerritoryCanvas(model: model, analyzeDisplay: model.analyzeDisplay)
           .frame(width: side, height: side)
 
         StoneLayer(model: model, side: side)
@@ -18,7 +18,7 @@ struct BoardView: View {
         RecognitionPreviewCanvas(model: model)
           .frame(width: side, height: side)
 
-        CandidateCanvas(model: model)
+        CandidateCanvas(analyzeDisplay: model.analyzeDisplay)
           .frame(width: side, height: side)
       }
       .frame(width: side, height: side)
@@ -49,26 +49,24 @@ struct BoardBackgroundCanvas: View {
       context.fill(Path(rect), with: .color(boardColor))
 
       let lineWidth = max(1.0, side * 0.0021)
-      let edgeInset = lineWidth * 0.5
-      func visibleGridCoordinate(_ index: Int) -> CGFloat {
-        if index == 0 { return edgeInset }
-        if index == BoardGeometry.boardSize - 1 { return side - edgeInset }
-        return side * CGFloat(index) * BoardGeometry.step
-      }
+      // Grid follows BoardGeometry so edge stones/candidates share the same inset.
+      let origin = BoardGeometry.intersection(x: 0, y: 0, side: side)
+      let far = BoardGeometry.intersection(
+        x: BoardGeometry.boardSize - 1,
+        y: BoardGeometry.boardSize - 1,
+        side: side
+      )
       for index in 0..<BoardGeometry.boardSize {
-        let axis = visibleGridCoordinate(index)
-        let startVertical = CGPoint(x: axis, y: edgeInset)
-        let endVertical = CGPoint(x: axis, y: side - edgeInset)
+        let axisX = BoardGeometry.intersection(x: index, y: 0, side: side).x
         var vertical = Path()
-        vertical.move(to: startVertical)
-        vertical.addLine(to: endVertical)
+        vertical.move(to: CGPoint(x: axisX, y: origin.y))
+        vertical.addLine(to: CGPoint(x: axisX, y: far.y))
         context.stroke(vertical, with: .color(lineColor), lineWidth: lineWidth)
 
-        let startHorizontal = CGPoint(x: edgeInset, y: axis)
-        let endHorizontal = CGPoint(x: side - edgeInset, y: axis)
+        let axisY = BoardGeometry.intersection(x: 0, y: index, side: side).y
         var horizontal = Path()
-        horizontal.move(to: startHorizontal)
-        horizontal.addLine(to: endHorizontal)
+        horizontal.move(to: CGPoint(x: origin.x, y: axisY))
+        horizontal.addLine(to: CGPoint(x: far.x, y: axisY))
         context.stroke(horizontal, with: .color(lineColor), lineWidth: lineWidth)
       }
 
@@ -92,8 +90,13 @@ struct BoardBackgroundCanvas: View {
 
 enum BoardGeometry {
   static let boardSize = 19
-  static let pad: CGFloat = 0.0
-  static let step: CGFloat = 1.0 / 18.0
+  /// Fraction of board side reserved around the grid so edge stones, candidate
+  /// disks, and rank tags are not clipped by the canvas bounds.
+  /// Candidate radius ≈ 0.40·step and rank sits ~0.62·radius outside the disk;
+  /// 0.05 leaves a small wood margin past that extent.
+  static let pad: CGFloat = 0.05
+  /// Distance between adjacent intersections as a fraction of board side.
+  static var step: CGFloat { (1.0 - 2.0 * pad) / CGFloat(boardSize - 1) }
 
   static func intersection(x: Int, y: Int, side: CGFloat) -> CGPoint {
     CGPoint(
@@ -116,59 +119,164 @@ enum BoardGeometry {
 struct StoneLayer: View {
   @ObservedObject var model: QixiViewModel
   var side: CGFloat
+  /// 0…1 appear weight for newly placed stones (forward-step / play). Full board loads skip fade.
+  @State private var appearWeightByStoneID: [Int: Double] = [:]
+  @State private var appearTicker: Task<Void, Never>?
+
+  /// Match candidate enter timing (~280 ms).
+  private static let appearRatePerSecond = 1.0 / 0.28
 
   var body: some View {
     let stoneSize = side * BoardGeometry.step * 0.94
+    let outlineLineWidth = max(1.4, side * BoardGeometry.step * 0.055)
     let capturedByNextMove = model.nextMoveCapturedBoardPointIDs
+    let showCaptureOutlines = model.nextMoveShowsCaptureOutlines
+    let stoneIDs = model.visibleBoardStones.map(\.id)
     ZStack {
       ForEach(model.visibleBoardStones) { stone in
-        let isCapturedByNextMove = capturedByNextMove.contains(stone.id)
-        BundleImage(name: stone.color == .black ? "black19Yunzi" : "whiteStone")
-          .aspectRatio(contentMode: .fit)
-          .frame(width: stoneSize, height: stoneSize)
-          .opacity(isCapturedByNextMove ? 0.34 : 1.0)
-          .saturation(isCapturedByNextMove ? 0.35 : 1.0)
-          .position(BoardGeometry.intersection(x: stone.x, y: stone.y, side: side))
+        let isCapturedOutline =
+          showCaptureOutlines && capturedByNextMove.contains(stone.id)
+        let point = BoardGeometry.intersection(x: stone.x, y: stone.y, side: side)
+        let weight = min(1.0, max(0.0, appearWeightByStoneID[stone.id] ?? 1.0))
+        // Smoothstep so outline → solid reads as a soft gradient, not a linear pop.
+        let s = weight * weight * (3.0 - 2.0 * weight)
+        if isCapturedOutline {
+          // Unanalyzed next-move preview: capture effect as a faint stone outline.
+          Circle()
+            .strokeBorder(
+              stone.color == .black
+                ? Color.black.opacity(0.42)
+                : Color.white.opacity(0.58),
+              lineWidth: outlineLineWidth
+            )
+            .frame(width: stoneSize * 0.92, height: stoneSize * 0.92)
+            .opacity(s)
+            .position(point)
+        } else {
+          BundleImage(name: stone.color == .black ? "black19Yunzi" : "whiteStone")
+            .aspectRatio(contentMode: .fit)
+            .frame(width: stoneSize, height: stoneSize)
+            // Start slightly smaller / transparent so forward-step from a next-move
+            // stroke fills in with a gradient rather than a hard pop (esp. no-engine).
+            .scaleEffect(0.82 + 0.18 * s)
+            .opacity(s)
+            .position(point)
+        }
+      }
+    }
+    .onAppear {
+      reconcileAppearWeights(stoneIDs: stoneIDs, animateNew: false)
+    }
+    .onChange(of: stoneIDs) { oldIDs, newIDs in
+      // Only animate a small number of newcomers (step/play). Bulk load → full opacity.
+      let oldSet = Set(oldIDs)
+      let newcomers = newIDs.filter { !oldSet.contains($0) }
+      reconcileAppearWeights(stoneIDs: newIDs, animateNew: newcomers.count > 0 && newcomers.count <= 4)
+    }
+  }
+
+  private func reconcileAppearWeights(stoneIDs: [Int], animateNew: Bool) {
+    let live = Set(stoneIDs)
+    for id in appearWeightByStoneID.keys where !live.contains(id) {
+      appearWeightByStoneID.removeValue(forKey: id)
+    }
+    for id in stoneIDs {
+      if appearWeightByStoneID[id] == nil {
+        appearWeightByStoneID[id] = animateNew ? 0.0 : 1.0
+      }
+    }
+    if animateNew {
+      ensureAppearTicker()
+    }
+  }
+
+  private func ensureAppearTicker() {
+    guard appearTicker == nil else { return }
+    appearTicker = Task { @MainActor in
+      defer { appearTicker = nil }
+      while !Task.isCancelled {
+        var any = false
+        let dt = 1.0 / 60.0
+        for (id, weight) in appearWeightByStoneID {
+          if weight < 0.999 {
+            appearWeightByStoneID[id] = min(1.0, weight + Self.appearRatePerSecond * dt)
+            any = true
+          } else if weight != 1.0 {
+            appearWeightByStoneID[id] = 1.0
+          }
+        }
+        if !any { return }
+        try? await Task.sleep(for: .milliseconds(16))
       }
     }
   }
 }
 
 struct CandidateCanvas: View {
-  @ObservedObject var model: QixiViewModel
+  /// Observes analyze plane only — not board stones / chrome.
+  @ObservedObject var analyzeDisplay: QixiAnalyzeDisplayModel
 
   var body: some View {
     Canvas(rendersAsynchronously: true) { context, size in
       let side = min(size.width, size.height)
-      let analysisRadius = side * BoardGeometry.step * 0.62
+      // Diameter must stay under one grid step so neighboring plates do not collide.
+      // step * 0.40 → diameter ≈ 0.80 of cell gap (was 0.62 → 1.24, heavy overlap).
+      let analysisRadius = side * BoardGeometry.step * 0.40
       let stoneRadius = side * BoardGeometry.step * 0.47
-      for candidate in model.visibleCandidateOverlays {
+      for candidate in analyzeDisplay.overlays {
         let radius = candidate.usesStoneSizedContinuationMarker ? stoneRadius : analysisRadius
         let point = BoardGeometry.intersection(x: candidate.x, y: candidate.y, side: side)
         let circle = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-        context.fill(
-          Path(ellipseIn: circle),
-          with: .color(candidate.colorComponents?.color ?? QixiColor.background)
-        )
-        if let ringColor = candidate.continuationRingColor {
-          drawContinuationRing(
+
+        // Enter/exit weight: 0 = leaving/entering display set, 1 = stable in set.
+        let weight = min(1.0, max(0.0, candidate.presentationWeight))
+
+        if candidate.usesStoneSizedContinuationMarker {
+          // Unanalyzed next move: faint stone outline (no analysis disk fill).
+          // Still respect weight so forced next-move markers can fade with the set.
+          if weight < 0.05 { continue }
+          drawFaintStoneOutline(
+            in: &context,
+            circle: circle,
+            radius: radius,
+            color: candidate.continuationRingColor ?? .black,
+            opacityScale: weight
+          )
+          continue
+        }
+
+        // Color gradient through the −5% display threshold tint while entering/exiting.
+        // Keep solid tint expression for contract / identity of the quality color source.
+        let solidTint = candidate.colorComponents?.color ?? QixiColor.background
+        let fillColor: Color
+        if let base = candidate.colorComponents {
+          fillColor = CandidatePalette.presentationComponents(base: base, weight: weight).color
+        } else {
+          fillColor = solidTint.opacity(weight)
+        }
+        context.fill(Path(ellipseIn: circle), with: .color(fillColor))
+        if let ringColor = candidate.continuationRingColor, weight > 0.2 {
+          // Analyzed next move: very thin white/black ring on the disk edge.
+          drawThinAnalysisEdgeRing(
             in: &context,
             circle: circle,
             radius: radius,
             color: ringColor
           )
         }
-        guard candidate.showsAnalysisText else { continue }
+        guard candidate.showsAnalysisText, weight > 0.45 else { continue }
 
-        let rankPoint = CGPoint(x: point.x + radius * 0.78, y: point.y - radius * 0.78)
+        let textOpacity = Double(weight)
+        // Compact rank tag just outside the rim (smaller offset than before).
+        let rankPoint = CGPoint(x: point.x + radius * 0.62, y: point.y - radius * 0.62)
         context.draw(
           Text(candidate.rankText)
-            .font(.system(size: max(9, side * 0.014), weight: .bold))
-            .foregroundStyle(QixiColor.ink),
+            .font(.system(size: max(7.5, side * 0.011), weight: .bold))
+            .foregroundStyle(QixiColor.ink.opacity(textOpacity)),
           at: rankPoint,
           anchor: .center
         )
-        let analysisLineOffset = radius * 0.44
+        let analysisLineOffset = radius * 0.36
         let analysisFontSize = candidateAnalysisFontSize(
           for: candidate,
           radius: radius,
@@ -177,21 +285,21 @@ struct CandidateCanvas: View {
         context.draw(
           Text(candidate.winrateText)
             .font(.system(size: analysisFontSize, weight: .bold, design: .rounded))
-            .foregroundStyle(.white),
+            .foregroundStyle(.white.opacity(textOpacity)),
           at: CGPoint(x: point.x, y: point.y - analysisLineOffset),
           anchor: .center
         )
         context.draw(
           Text(candidate.visitsText)
             .font(.system(size: analysisFontSize, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white),
+            .foregroundStyle(.white.opacity(textOpacity)),
           at: point,
           anchor: .center
         )
         context.draw(
           Text(candidate.scoreText)
             .font(.system(size: analysisFontSize, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.94)),
+            .foregroundStyle(.white.opacity(0.94 * textOpacity)),
           at: CGPoint(x: point.x, y: point.y + analysisLineOffset),
           anchor: .center
         )
@@ -200,21 +308,42 @@ struct CandidateCanvas: View {
     .accessibilityIdentifier("candidate-120hz-canvas")
   }
 
-  private func drawContinuationRing(
+  private func drawFaintStoneOutline(
+    in context: inout GraphicsContext,
+    circle: CGRect,
+    radius: CGFloat,
+    color: StoneColor,
+    opacityScale: Double = 1.0
+  ) {
+    let lineWidth = max(1.5, radius * 0.085)
+    let path = Path(ellipseIn: circle.insetBy(dx: lineWidth * 0.5, dy: lineWidth * 0.5))
+    let s = min(1.0, max(0.0, opacityScale))
+    switch color {
+    case .black:
+      context.stroke(path, with: .color(Color.black.opacity(0.40 * s)), lineWidth: lineWidth)
+    case .white:
+      // Single soft outline (no dual ink underlay — that drew two black rims).
+      // Slightly higher opacity so it stays visible on light board paper without a
+      // second stroke.
+      context.stroke(path, with: .color(Color.white.opacity(0.94 * s)), lineWidth: lineWidth * 1.05)
+    }
+  }
+
+  private func drawThinAnalysisEdgeRing(
     in context: inout GraphicsContext,
     circle: CGRect,
     radius: CGFloat,
     color: StoneColor
   ) {
-    let ringWidth = max(2.2, radius * 0.18)
+    // Very thin edge ring around the analysis disk.
+    let ringWidth = max(1.0, radius * 0.055)
+    let ringPath = Path(ellipseIn: circle.insetBy(dx: ringWidth * 0.50, dy: ringWidth * 0.50))
     switch color {
     case .black:
-      let ringPath = Path(ellipseIn: circle.insetBy(dx: ringWidth * 0.50, dy: ringWidth * 0.50))
-      context.stroke(ringPath, with: .color(Color.black.opacity(0.90)), lineWidth: ringWidth)
+      context.stroke(ringPath, with: .color(Color.black.opacity(0.92)), lineWidth: ringWidth)
     case .white:
-      let ringPath = Path(ellipseIn: circle.insetBy(dx: ringWidth * 0.67, dy: ringWidth * 0.67))
-      context.stroke(ringPath, with: .color(QixiColor.ink.opacity(0.62)), lineWidth: ringWidth * 1.34)
-      context.stroke(ringPath, with: .color(Color.white.opacity(0.98)), lineWidth: ringWidth * 0.82)
+      // Single white rim — no dual dark underlay (same dual-edge artifact as faint outline).
+      context.stroke(ringPath, with: .color(Color.white.opacity(0.96)), lineWidth: ringWidth)
     }
   }
 
@@ -228,9 +357,10 @@ struct CandidateCanvas: View {
       max(candidate.visitsText.count, candidate.scoreText.count)
     )
     let safeLength = max(1, longestLineLength)
-    let widthBound = radius * 1.52 / (CGFloat(safeLength) * 0.58)
-    let verticalBound = lineOffset * 0.78
-    return min(min(radius * 0.34, widthBound), verticalBound)
+    // Keep three text lines fully inside the smaller plate.
+    let widthBound = radius * 1.70 / (CGFloat(safeLength) * 0.55)
+    let verticalBound = lineOffset * 0.92
+    return min(min(radius * 0.38, widthBound), verticalBound)
   }
 }
 
@@ -266,19 +396,47 @@ struct RecognitionPreviewCanvas: View {
 
 struct TerritoryCanvas: View {
   @ObservedObject var model: QixiViewModel
+  @ObservedObject var analyzeDisplay: QixiAnalyzeDisplayModel
+
+  /// Hide faint ownership; aligns with `territoryPoints` filter (~0.16).
+  private static let magnitudeThreshold = 0.16
+  /// White squares sit on a light board — raise opacity vs black at the same inclination.
+  private static let whiteAlphaBoost = 1.55
 
   var body: some View {
-    Canvas(rendersAsynchronously: true) { context, size in
-      guard model.showTerritory else { return }
+    // Sync draw so ownership squares track the HUD without async lag.
+    Canvas(rendersAsynchronously: false) { context, size in
+      guard model.showTerritory, analyzeDisplay.hasOwnership else { return }
       let side = min(size.width, size.height)
-      let square = side * BoardGeometry.step / 3.0
+      // Compact square markers (not disks) centered on empty intersections.
+      let halfSide = side * BoardGeometry.step * 0.20
       let occupied = model.occupiedBoardPointIDs
-      for item in model.territory {
-        if occupied.contains(item.id) { continue }
-        let point = BoardGeometry.intersection(x: item.x, y: item.y, side: side)
-        let alpha = min(0.72, 0.18 + abs(item.ownership) * 0.5)
-        let color = item.ownership > 0 ? Color.white.opacity(alpha) : Color.black.opacity(alpha)
-        let rect = CGRect(x: point.x - square / 2.0, y: point.y - square / 2.0, width: square, height: square)
+      let ownership = analyzeDisplay.ownership
+      guard ownership.count == 361 else { return }
+      let threshold = Self.magnitudeThreshold
+      let span = max(1e-6, 1.0 - threshold)
+      for index in 0..<361 {
+        if occupied.contains(index) { continue }
+        let value = Double(ownership[index])
+        let magnitude = min(1.0, abs(value))
+        // Skip weak / uncertain claims so the map stays readable.
+        guard magnitude >= threshold else { continue }
+        let x = index % 19
+        let y = index / 19
+        let point = BoardGeometry.intersection(x: x, y: y, side: side)
+        // Remap [threshold, 1] → [0, 1], then smoothstep for alpha.
+        let normalized = min(1.0, max(0.0, (magnitude - threshold) / span))
+        let t = normalized * normalized * (3.0 - 2.0 * normalized)
+        let isWhite = value > 0
+        let baseAlpha = 0.16 + 0.68 * t
+        let alpha = min(0.94, isWhite ? baseAlpha * Self.whiteAlphaBoost : baseAlpha)
+        let color = isWhite ? Color.white.opacity(alpha) : Color.black.opacity(alpha)
+        let rect = CGRect(
+          x: point.x - halfSide,
+          y: point.y - halfSide,
+          width: halfSide * 2,
+          height: halfSide * 2
+        )
         context.fill(Path(rect), with: .color(color))
       }
     }

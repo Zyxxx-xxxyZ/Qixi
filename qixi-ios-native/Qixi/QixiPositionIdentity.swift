@@ -8,7 +8,8 @@ enum QixiPositionIdentity {
     moves: [BoardMove],
     setupStones: [BoardSetupStone] = [],
     komi: Double,
-    rootNoise: Double
+    rootNoise: Double,
+    rootToMove: StoneColor = .black
   ) -> String {
     let normalizedSetupStones = canonicalSetupStones(setupStones)
     var key = "\(engine.rawValue)|rules:\(fixedRules)|komiBits:\(doubleBits(komi))|rootNoiseBits:\(doubleBits(rootNoise))|"
@@ -16,7 +17,8 @@ enum QixiPositionIdentity {
       key.append("setup:")
       key.append(canonicalSetupText(normalizedSetupStones))
       key.append("|next:")
-      key.append(QixiBoardPosition.nextPlayer(after: moves).rawValue)
+      // rootToMove matters when history is empty (SGF/setup can leave White to play).
+      key.append(QixiBoardPosition.nextPlayer(after: moves, rootToMove: rootToMove).rawValue)
       key.append("|")
     }
     key.append("history:")
@@ -72,7 +74,8 @@ struct QixiAnalysisRequestIdentity: Equatable {
     moves: [BoardMove],
     setupStones: [BoardSetupStone] = [],
     komi: Double,
-    rootNoise: Double
+    rootNoise: Double,
+    rootToMove: StoneColor = .black
   ) {
     self.engine = engine
     self.cacheKey = QixiPositionIdentity.cacheKey(
@@ -80,7 +83,8 @@ struct QixiAnalysisRequestIdentity: Equatable {
       moves: moves,
       setupStones: setupStones,
       komi: komi,
-      rootNoise: rootNoise
+      rootNoise: rootNoise,
+      rootToMove: rootToMove
     )
   }
 
@@ -89,14 +93,16 @@ struct QixiAnalysisRequestIdentity: Equatable {
     moves: [BoardMove],
     setupStones: [BoardSetupStone] = [],
     komi: Double,
-    rootNoise: Double
+    rootNoise: Double,
+    rootToMove: StoneColor = .black
   ) -> Bool {
     self == QixiAnalysisRequestIdentity(
       engine: engine,
       moves: moves,
       setupStones: setupStones,
       komi: komi,
-      rootNoise: rootNoise
+      rootNoise: rootNoise,
+      rootToMove: rootToMove
     )
   }
 }

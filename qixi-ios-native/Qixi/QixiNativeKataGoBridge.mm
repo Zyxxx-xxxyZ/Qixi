@@ -121,6 +121,26 @@ NSString * const QixiNativeKataGoErrorDomain = @"QixiNativeKataGo";
   return nil;
 }
 
+- (uint64_t)publishedAnalyzeRevision {
+  return _core->publishedAnalyzeRevision();
+}
+
+- (nullable NSData *)analyzeDisplayPayloadData {
+  qixi::core::AnalyzeDisplayPayload payload{};
+  if (!_core->tryLoadAnalyzeDisplay(payload)) {
+    return nil;
+  }
+  return [NSData dataWithBytes:&payload length:sizeof(payload)];
+}
+
+- (BOOL)postNavPlayMove:(uint32_t)move uiIntentId:(uint64_t)uiIntentId {
+  return _core->postNavPlay(move, uiIntentId) ? YES : NO;
+}
+
+- (BOOL)postNavSwitchRoot:(uint32_t)nodeId uiIntentId:(uint64_t)uiIntentId {
+  return _core->postNavSwitchRoot(nodeId, uiIntentId) ? YES : NO;
+}
+
 - (nullable NSString *)coreIoProgressJSONWithError:(NSError **)error {
   qixi::NativeKataGoResult result = _core->coreIoProgressJSON();
   if (result.ok()) {

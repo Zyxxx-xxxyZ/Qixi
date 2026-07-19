@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import UIKit
 
 struct QixiCachedAnalysis: Codable, Equatable {
   var savedAt: Date
@@ -12,7 +13,8 @@ struct QixiCachedAnalysis: Codable, Equatable {
 }
 
 struct QixiAppSnapshot: Codable, Equatable {
-  static let currentSchemaVersion = 1
+  /// v2 adds optional rootNoise; v3 adds optional nextPlayer (root side-to-move / PL).
+  static let currentSchemaVersion = 3
 
   var schemaVersion: Int = QixiAppSnapshot.currentSchemaVersion
   var savedAt: Date
@@ -21,9 +23,67 @@ struct QixiAppSnapshot: Codable, Equatable {
   var currentPly: Int
   var mainLine: [BoardMove]
   var recognizedSetupStones: [BoardSetupStone]?
+  /// Explicit root side-to-move (photo recognition / SGF PL). Nil → infer from first move / Black.
+  var nextPlayer: StoneColor?
   var komi: Double
+  /// Wide-root noise; included in analysis cache keys — must survive restore/sync.
+  var rootNoise: Double = QixiAnalysisLimits.defaultRootNoise
   var showTerritory: Bool
   var analysisByEngine: [String: [String: QixiCachedAnalysis]]
+
+  enum CodingKeys: String, CodingKey {
+    case schemaVersion, savedAt, saveReason, selectedEngine, currentPly, mainLine
+    case recognizedSetupStones, nextPlayer, komi, rootNoise, showTerritory, analysisByEngine
+  }
+
+  init(
+    schemaVersion: Int = QixiAppSnapshot.currentSchemaVersion,
+    savedAt: Date,
+    saveReason: String,
+    selectedEngine: AnalysisEngine,
+    currentPly: Int,
+    mainLine: [BoardMove],
+    recognizedSetupStones: [BoardSetupStone]? = nil,
+    nextPlayer: StoneColor? = nil,
+    komi: Double,
+    rootNoise: Double = QixiAnalysisLimits.defaultRootNoise,
+    showTerritory: Bool,
+    analysisByEngine: [String: [String: QixiCachedAnalysis]]
+  ) {
+    self.schemaVersion = schemaVersion
+    self.savedAt = savedAt
+    self.saveReason = saveReason
+    self.selectedEngine = selectedEngine
+    self.currentPly = currentPly
+    self.mainLine = mainLine
+    self.recognizedSetupStones = recognizedSetupStones
+    self.nextPlayer = nextPlayer
+    self.komi = komi
+    self.rootNoise = rootNoise
+    self.showTerritory = showTerritory
+    self.analysisByEngine = analysisByEngine
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+      ?? QixiAppSnapshot.currentSchemaVersion
+    savedAt = try container.decode(Date.self, forKey: .savedAt)
+    saveReason = try container.decode(String.self, forKey: .saveReason)
+    selectedEngine = try container.decode(AnalysisEngine.self, forKey: .selectedEngine)
+    currentPly = try container.decode(Int.self, forKey: .currentPly)
+    mainLine = try container.decode([BoardMove].self, forKey: .mainLine)
+    recognizedSetupStones = try container.decodeIfPresent([BoardSetupStone].self, forKey: .recognizedSetupStones)
+    nextPlayer = try container.decodeIfPresent(StoneColor.self, forKey: .nextPlayer)
+    komi = try container.decode(Double.self, forKey: .komi)
+    rootNoise = try container.decodeIfPresent(Double.self, forKey: .rootNoise)
+      ?? QixiAnalysisLimits.defaultRootNoise
+    showTerritory = try container.decode(Bool.self, forKey: .showTerritory)
+    analysisByEngine = try container.decode(
+      [String: [String: QixiCachedAnalysis]].self,
+      forKey: .analysisByEngine
+    )
+  }
 }
 
 enum QixiSnapshotValidationError: Error, Equatable {
@@ -43,12 +103,13 @@ private struct QixiSemanticCacheKeyIdentity {
 
 extension QixiAppSnapshot {
   func hasSameRestorableState(as other: QixiAppSnapshot) -> Bool {
-    schemaVersion == other.schemaVersion &&
-      selectedEngine == other.selectedEngine &&
+    selectedEngine == other.selectedEngine &&
       currentPly == other.currentPly &&
       mainLine == other.mainLine &&
       normalizedSetupStones(recognizedSetupStones) == normalizedSetupStones(other.recognizedSetupStones) &&
+      nextPlayer == other.nextPlayer &&
       komi == other.komi &&
+      rootNoise == other.rootNoise &&
       showTerritory == other.showTerritory &&
       analysisByEngine == other.analysisByEngine
   }
@@ -1034,8 +1095,14 @@ enum QixiSnapshotStore {
     guard QixiBoardPosition.firstIllegalMoveIndex(in: moves, setupStones: setupStones) == nil else {
       return nil
     }
-    if let nextPlayer, nextPlayer != QixiBoardPosition.nextPlayer(after: moves) {
-      return nil
+    if let nextPlayer {
+      // Empty history may legally be White to play (setup + W first). Non-empty history
+      // is fully determined by the last move color.
+      if moves.isEmpty {
+        guard nextPlayer == .black || nextPlayer == .white else { return nil }
+      } else if nextPlayer != QixiBoardPosition.nextPlayer(after: moves) {
+        return nil
+      }
     }
     return QixiSemanticCacheKeyIdentity(
       komi: komi,
@@ -1288,25 +1355,227 @@ enum QixiEngineTombstoneStore {
 }
 
 enum QixiMCTSStatePackageStore {
-  static let packageExtension = "qixi-mcts"
+  /// User-visible archives use a name ending in `.png` so Files / iCloud Drive
+  /// classify them as images and show the board thumbnail. Legacy `.qixi-mcts`
+  /// directory/file packages remain openable.
+  static let packageExtension = "qixi.png"
+  static let legacyPackageExtensions = ["qixi-mcts"]
   static let contentTypeIdentifier = "com.zyx.qixi.mcts-state"
+
+  static var allPackageFilenameSuffixes: [String] {
+    [packageExtension] + legacyPackageExtensions
+  }
+
+  static func filenameLooksLikePackage(_ name: String) -> Bool {
+    let lower = name.lowercased()
+    return allPackageFilenameSuffixes.contains { lower.hasSuffix(".\($0)") }
+  }
   static let manifestFilename = "manifest.json"
   static let snapshotFilename = "snapshot.json"
   static let engineTombstoneFilename = QixiEngineTombstoneStore.tombstoneFilename
   static let coreStateFilename = "core-state.bin"
+  /// Final board position preview (optional; ignored by older loaders).
+  static let thumbnailFilename = "thumbnail.png"
+  /// System package preview path (Files / Quick Look look here for document icons).
+  static let quickLookDirectoryName = "QuickLook"
+  static let quickLookThumbnailFilename = "Thumbnail.png"
+  /// Optional main-line SGF colocated in the package for portable game record.
+  static let gameSGFFilename = "game.sgf"
   static let maxManifestBytes = 64 * 1024
   static let maxTombstoneBytes: UInt64 = 256 * 1024 * 1024
   static let maxCoreStateBytes: UInt64 = 512 * 1024 * 1024
+  /// Magic trailer after a board PNG so Files shows a real board icon while the
+  /// payload still carries snapshot / core-state / SGF. Directory packages remain
+  /// readable for older archives.
+  static let imageDocumentMagic = Data("QIXIMC01".utf8)
+  static let imageDocumentMaxBytes: UInt64 = 768 * 1024 * 1024
 
-  static func freshTemporaryPackageURL() throws -> URL {
+  static func freshTemporaryPackageURL(baseName: String? = nil) throws -> URL {
+    let leaf = baseName.flatMap { name -> String? in
+      let cleaned = QixiSyncStore.sanitizeFileBaseName(name)
+      return cleaned.isEmpty ? nil : cleaned
+    } ?? "qixi-state-\(UUID().uuidString)"
     let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent("qixi-state-\(UUID().uuidString)")
+      .appendingPathComponent(leaf)
       .appendingPathExtension(packageExtension)
     if FileManager.default.fileExists(atPath: url.path) {
       try FileManager.default.removeItem(at: url)
     }
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
+  }
+
+  /// Converts a finished directory package into a single regular file whose leading
+  /// bytes are a board PNG (so Files / iCloud Drive render distinct icons).
+  /// Replaces `packageURL` in place (directory → file).
+  static func sealDirectoryPackageAsImageDocument(_ packageURL: URL) throws {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDirectory),
+          isDirectory.boolValue
+    else {
+      // Already a file — leave as-is (may already be sealed).
+      return
+    }
+    let pngCandidates = [
+      quickLookThumbnailURL(in: packageURL),
+      thumbnailURL(in: packageURL),
+    ]
+    guard let pngURL = pngCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+          let pngData = try? Data(contentsOf: pngURL),
+          pngData.count >= 24,
+          pngData.starts(with: Data([0x89, 0x50, 0x4E, 0x47]))
+    else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "cannot seal image document without a board thumbnail.png"
+      )
+    }
+
+    let memberNames = [
+      manifestFilename,
+      snapshotFilename,
+      coreStateFilename,
+      gameSGFFilename,
+      thumbnailFilename,
+      engineTombstoneFilename,
+    ]
+    var sections: [(String, Data)] = []
+    for name in memberNames {
+      let url = packageURL.appendingPathComponent(name, isDirectory: false)
+      guard FileManager.default.fileExists(atPath: url.path),
+            let data = try? Data(contentsOf: url),
+            !data.isEmpty
+      else { continue }
+      sections.append((name, data))
+    }
+    guard sections.contains(where: { $0.0 == snapshotFilename }) else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "cannot seal image document without snapshot.json"
+      )
+    }
+
+    var payload = Data()
+    payload.reserveCapacity(pngData.count + 64 + sections.reduce(0) { $0 + $1.1.count + 32 })
+    payload.append(pngData)
+    payload.append(imageDocumentMagic)
+    var sectionCount = UInt32(sections.count).littleEndian
+    withUnsafeBytes(of: &sectionCount) { payload.append(contentsOf: $0) }
+    for (name, data) in sections {
+      let nameData = Data(name.utf8)
+      var nameLen = UInt16(nameData.count).littleEndian
+      withUnsafeBytes(of: &nameLen) { payload.append(contentsOf: $0) }
+      payload.append(nameData)
+      var dataLen = UInt64(data.count).littleEndian
+      withUnsafeBytes(of: &dataLen) { payload.append(contentsOf: $0) }
+      payload.append(data)
+    }
+    guard UInt64(payload.count) <= imageDocumentMaxBytes else {
+      throw QixiStrictJSONError.documentTooLarge(
+        label: "Qixi MCTS image document",
+        bytes: payload.count,
+        limit: Int(imageDocumentMaxBytes)
+      )
+    }
+
+    let tempFile = packageURL.deletingLastPathComponent()
+      .appendingPathComponent(".seal-\(UUID().uuidString).\(packageExtension)", isDirectory: false)
+    try payload.write(to: tempFile, options: [.atomic])
+    try FileManager.default.removeItem(at: packageURL)
+    try FileManager.default.moveItem(at: tempFile, to: packageURL)
+  }
+
+  /// If `packageURL` is a sealed image document, expand members into a temp directory
+  /// and return that directory (caller owns cleanup). Directory packages return as-is.
+  static func materializePackageDirectory(from packageURL: URL) throws -> (url: URL, isTemporary: Bool) {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDirectory) else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "path does not exist"
+      )
+    }
+    if isDirectory.boolValue {
+      return (packageURL, false)
+    }
+
+    let data = try Data(contentsOf: packageURL, options: [.mappedIfSafe])
+    guard data.count > imageDocumentMagic.count + 8,
+          data.starts(with: Data([0x89, 0x50, 0x4E, 0x47]))
+    else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "regular file is not a Qixi image document or directory package"
+      )
+    }
+    // Find magic after PNG IEND to tolerate minor PNG encoder variance; fall back to last occurrence.
+    guard let magicRange = data.range(of: imageDocumentMagic) else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "image document missing QIXIMC01 payload marker"
+      )
+    }
+    var cursor = magicRange.upperBound
+    func readLEInteger(byteCount: Int) throws -> UInt64 {
+      guard cursor + byteCount <= data.count else {
+        throw QixiStrictJSONError.malformed(
+          label: "Qixi MCTS image document",
+          message: "truncated integer (\(byteCount) bytes)"
+        )
+      }
+      var value: UInt64 = 0
+      for i in 0..<byteCount {
+        value |= UInt64(data[cursor + i]) << (8 * i)
+      }
+      cursor += byteCount
+      return value
+    }
+    func readU32() throws -> UInt32 { UInt32(try readLEInteger(byteCount: 4)) }
+    func readU16() throws -> UInt16 { UInt16(try readLEInteger(byteCount: 2)) }
+    func readU64() throws -> UInt64 { try readLEInteger(byteCount: 8) }
+
+    let sectionCount = try readU32()
+    guard sectionCount > 0 && sectionCount < 64 else {
+      throw QixiStrictJSONError.malformed(label: "Qixi MCTS image document", message: "invalid section count")
+    }
+    let tempDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qixi-unseal-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    do {
+      for _ in 0..<sectionCount {
+        let nameLen = Int(try readU16())
+        guard nameLen > 0, nameLen < 512, cursor + nameLen <= data.count else {
+          throw QixiStrictJSONError.malformed(label: "Qixi MCTS image document", message: "invalid section name")
+        }
+        let nameData = data.subdata(in: cursor..<(cursor + nameLen))
+        cursor += nameLen
+        guard let name = String(data: nameData, encoding: .utf8),
+              !name.contains("/"), !name.contains("..")
+        else {
+          throw QixiStrictJSONError.malformed(label: "Qixi MCTS image document", message: "invalid section name encoding")
+        }
+        let dataLen = Int(try readU64())
+        guard dataLen >= 0, cursor + dataLen <= data.count else {
+          throw QixiStrictJSONError.malformed(label: "Qixi MCTS image document", message: "invalid section data length")
+        }
+        let section = data.subdata(in: cursor..<(cursor + dataLen))
+        cursor += dataLen
+        try section.write(
+          to: tempDir.appendingPathComponent(name, isDirectory: false),
+          options: [.atomic]
+        )
+      }
+      // Ensure a root thumbnail exists for loaders / re-export even if only payload had it.
+      let rootThumb = tempDir.appendingPathComponent(thumbnailFilename, isDirectory: false)
+      if !FileManager.default.fileExists(atPath: rootThumb.path) {
+        // Leading PNG is always the board image.
+        try data.subdata(in: 0..<magicRange.lowerBound).write(to: rootThumb, options: [.atomic])
+      }
+      return (tempDir, true)
+    } catch {
+      try? FileManager.default.removeItem(at: tempDir)
+      throw error
+    }
   }
 
   static func snapshotURL(in packageURL: URL) -> URL {
@@ -1321,9 +1590,83 @@ enum QixiMCTSStatePackageStore {
     packageURL.appendingPathComponent(coreStateFilename, isDirectory: false)
   }
 
+  static func thumbnailURL(in packageURL: URL) -> URL {
+    packageURL.appendingPathComponent(thumbnailFilename, isDirectory: false)
+  }
+
+  /// Board preview for Open list rows (directory package, sealed image document, or plain PNG).
+  static func previewThumbnailImage(from packageURL: URL, maxPixelSize: CGFloat = 160) -> UIImage? {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDirectory) else {
+      return nil
+    }
+    if isDirectory.boolValue {
+      let candidates = [quickLookThumbnailURL(in: packageURL), thumbnailURL(in: packageURL)]
+      for url in candidates {
+        if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+          return scaledPreview(image, maxPixelSize: maxPixelSize)
+        }
+      }
+      return nil
+    }
+    // Sealed `.qixi.png` begins with a board PNG; UIImage stops at IEND.
+    if let image = UIImage(contentsOfFile: packageURL.path) {
+      return scaledPreview(image, maxPixelSize: maxPixelSize)
+    }
+    if let data = try? Data(contentsOf: packageURL, options: [.mappedIfSafe]),
+       data.starts(with: Data([0x89, 0x50, 0x4E, 0x47])),
+       let image = UIImage(data: data) {
+      return scaledPreview(image, maxPixelSize: maxPixelSize)
+    }
+    return nil
+  }
+
+  private static func scaledPreview(_ image: UIImage, maxPixelSize: CGFloat) -> UIImage {
+    let maxSide = max(image.size.width, image.size.height)
+    guard maxSide > maxPixelSize, maxSide > 0 else { return image }
+    let scale = maxPixelSize / maxSide
+    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    let format = UIGraphicsImageRendererFormat.default()
+    format.opaque = true
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+      image.draw(in: CGRect(origin: .zero, size: size))
+    }
+  }
+
+  static func quickLookDirectoryURL(in packageURL: URL) -> URL {
+    packageURL.appendingPathComponent(quickLookDirectoryName, isDirectory: true)
+  }
+
+  static func quickLookThumbnailURL(in packageURL: URL) -> URL {
+    quickLookDirectoryURL(in: packageURL)
+      .appendingPathComponent(quickLookThumbnailFilename, isDirectory: false)
+  }
+
+  static func gameSGFURL(in packageURL: URL) -> URL {
+    packageURL.appendingPathComponent(gameSGFFilename, isDirectory: false)
+  }
+
   static func writeSnapshot(_ snapshot: QixiAppSnapshot, to packageURL: URL) throws {
     let data = try QixiSnapshotStore.encode(snapshot)
     try data.write(to: snapshotURL(in: packageURL), options: [.atomic])
+  }
+
+  /// Writes board preview for app use (`thumbnail.png`) and for Files/Quick Look
+  /// (`QuickLook/Thumbnail.png`). Without the Quick Look path, every package shows
+  /// the same generic document icon.
+  static func writeThumbnailPNG(_ data: Data, to packageURL: URL) throws {
+    try data.write(to: thumbnailURL(in: packageURL), options: [.atomic])
+    let qlDir = quickLookDirectoryURL(in: packageURL)
+    try FileManager.default.createDirectory(at: qlDir, withIntermediateDirectories: true)
+    try data.write(to: quickLookThumbnailURL(in: packageURL), options: [.atomic])
+  }
+
+  static func writeGameSGF(_ text: String, to packageURL: URL) throws {
+    guard let data = text.data(using: .utf8) else {
+      throw CocoaError(.fileWriteInapplicableStringEncoding)
+    }
+    try data.write(to: gameSGFURL(in: packageURL), options: [.atomic])
   }
 
   static func writeManifest(
@@ -1357,15 +1700,22 @@ enum QixiMCTSStatePackageStore {
   }
 
   static func loadPackage(from packageURL: URL) throws -> QixiImportedMCTSStatePackage {
-    try validatePackageURL(packageURL)
-    let manifest = try loadManifest(from: packageURL)
+    let materialized = try materializePackageDirectory(from: packageURL)
+    let root = materialized.url
+    defer {
+      if materialized.isTemporary {
+        try? FileManager.default.removeItem(at: root)
+      }
+    }
+    try validatePackageURL(root)
+    let manifest = try loadManifest(from: root)
     guard manifest.snapshotFilename == snapshotFilename else {
       throw QixiStrictJSONError.malformed(
         label: "Qixi MCTS state package",
         message: "uses an unexpected snapshot filename"
       )
     }
-    guard let snapshot = try QixiSnapshotStore.decode(from: snapshotURL(in: packageURL)) else {
+    guard let snapshot = try QixiSnapshotStore.decode(from: snapshotURL(in: root)) else {
       throw QixiStrictJSONError.malformed(
         label: "Qixi MCTS state package",
         message: "contains an unsupported snapshot"
@@ -1380,6 +1730,7 @@ enum QixiMCTSStatePackageStore {
       )
     }
 
+    // Core-state / tombstone must outlive this function for import — copy out of temp.
     let tombstoneURL: URL?
     if let tombstoneFilename = manifest.engineTombstoneFilename {
       guard tombstoneFilename == engineTombstoneFilename else {
@@ -1388,9 +1739,16 @@ enum QixiMCTSStatePackageStore {
           message: "uses an unexpected engine tombstone filename"
         )
       }
-      let url = engineTombstoneURL(in: packageURL)
+      let url = engineTombstoneURL(in: root)
       try validateTombstoneURL(url)
-      tombstoneURL = url
+      if materialized.isTemporary {
+        let durable = FileManager.default.temporaryDirectory
+          .appendingPathComponent("qixi-import-tombstone-\(UUID().uuidString).bin", isDirectory: false)
+        try FileManager.default.copyItem(at: url, to: durable)
+        tombstoneURL = durable
+      } else {
+        tombstoneURL = url
+      }
     } else {
       tombstoneURL = nil
     }
@@ -1403,9 +1761,16 @@ enum QixiMCTSStatePackageStore {
           message: "uses an unexpected core state filename"
         )
       }
-      let url = coreStateURL(in: packageURL)
+      let url = coreStateURL(in: root)
       try validateCoreStateURL(url)
-      importedCoreStateURL = url
+      if materialized.isTemporary {
+        let durable = FileManager.default.temporaryDirectory
+          .appendingPathComponent("qixi-import-core-\(UUID().uuidString).bin", isDirectory: false)
+        try FileManager.default.copyItem(at: url, to: durable)
+        importedCoreStateURL = durable
+      } else {
+        importedCoreStateURL = url
+      }
     } else {
       importedCoreStateURL = nil
     }
@@ -1436,13 +1801,36 @@ enum QixiMCTSStatePackageStore {
   }
 
   private static func validatePackageURL(_ packageURL: URL) throws {
-    let values = try packageURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-    guard values.isSymbolicLink != true, values.isDirectory == true else {
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDirectory)
+    let values = try? packageURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+    if values?.isSymbolicLink == true {
       throw QixiStrictJSONError.malformed(
         label: "Qixi MCTS state package",
-        message: "must be a package directory"
+        message: "must not be a symbolic link"
       )
     }
+    guard exists else {
+      throw QixiStrictJSONError.malformed(
+        label: "Qixi MCTS state package",
+        message: "path does not exist"
+      )
+    }
+    // Directory packages (legacy) or already-materialized temp dirs.
+    let looksLikeDirectory = isDirectory.boolValue || values?.isDirectory == true
+    if looksLikeDirectory {
+      let hasManifest = FileManager.default.fileExists(
+        atPath: packageURL.appendingPathComponent(manifestFilename, isDirectory: false).path
+      )
+      guard hasManifest else {
+        throw QixiStrictJSONError.malformed(
+          label: "Qixi MCTS state package",
+          message: "missing manifest.json"
+        )
+      }
+      return
+    }
+    // Sealed image documents are validated during materializePackageDirectory.
   }
 
   private static func validateTombstoneURL(_ url: URL) throws {

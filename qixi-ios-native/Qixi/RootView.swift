@@ -2,6 +2,14 @@ import SwiftUI
 
 struct RootView: View {
   @ObservedObject var model: QixiViewModel
+  @Environment(\.scenePhase) private var scenePhase
+  /// Simulator aesthetics review: swipeable gallery or single layout via env.
+  private let reviewGalleryEnabled: Bool = {
+    let env = ProcessInfo.processInfo.environment
+    return env["QIXI_RECOGNITION_REVIEW_GALLERY"] == "1"
+      || env["QIXI_REVIEW_LAYOUT"] != nil
+  }()
+  private let reviewSoloLayout = CameraRecognitionReviewLayoutID.fromEnvironment()
 
   var body: some View {
     GeometryReader { proxy in
@@ -34,32 +42,58 @@ struct RootView: View {
         .padding(.trailing, safeInsets.trailing)
         .padding(.top, safeInsets.top)
         .padding(.bottom, safeInsets.bottom)
-        .disabled(model.isBackendInteractionBlocked)
-
-        if let job = model.activeBlockingJob, model.onboardingCompleted {
-          QixiMainPageProgressChrome(job: job)
-            .transition(.opacity)
-            .zIndex(3)
-        }
 
         if !model.onboardingCompleted {
           OnboardingView(model: model)
             .transition(.opacity)
             .zIndex(4)
         }
+
+        // Aesthetic layout previews (simulator). Does not affect normal product launches.
+        if reviewGalleryEnabled {
+          if let solo = reviewSoloLayout {
+            CameraRecognitionReviewLayoutSolo(layout: solo)
+              .zIndex(20)
+          } else {
+            CameraRecognitionReviewLayoutGallery()
+              .zIndex(20)
+          }
+        }
       }
       .animation(.easeInOut(duration: 0.18), value: model.onboardingCompleted)
-      .animation(.easeInOut(duration: 0.12), value: model.activeBlockingJob?.id)
     }
     .sheet(item: $model.utilitySheet) { sheet in
       QixiUtilitySheetView(sheet: sheet, host: model)
+    }
+    .alert(
+      L10n.text(.unsavedChangesTitle),
+      isPresented: Binding(
+        get: { model.pendingUnsavedDecision != nil },
+        set: { if !$0 { model.resolveUnsavedDecision(.cancel) } }
+      )
+    ) {
+      Button(L10n.text(.unsavedChangesSave)) {
+        model.resolveUnsavedDecision(.save)
+      }
+      Button(L10n.text(.unsavedChangesDiscard), role: .destructive) {
+        model.resolveUnsavedDecision(.discard)
+      }
+      Button(L10n.text(.unsavedChangesCancel), role: .cancel) {
+        model.resolveUnsavedDecision(.cancel)
+      }
+    } message: {
+      Text(L10n.text(.unsavedChangesMessage))
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .background {
+        model.handleAppWillBackground()
+      }
     }
   }
 }
 
 struct OnboardingView: View {
   @ObservedObject var model: QixiViewModel
-  @State private var enableICloud = false
 
   var body: some View {
     ZStack {
@@ -92,44 +126,14 @@ struct OnboardingView: View {
           }
         }
 
-        VStack(alignment: .leading, spacing: 8) {
-          Toggle(isOn: $enableICloud) {
-            VStack(alignment: .leading, spacing: 3) {
-              Text(L10n.text(.onboardingICloudTitle))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(QixiColor.ink)
-              Text(L10n.text(.onboardingICloudSubtitle))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(QixiColor.muted)
-            }
-          }
-          .toggleStyle(.switch)
-        }
-        .padding(12)
-        .background(QixiColor.controlSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(QixiColor.separator, lineWidth: 0.8))
-
-        HStack(spacing: 10) {
-          Button {
-            model.skipICloudOnboarding()
-          } label: {
-            Text(L10n.text(.onboardingSkipICloud))
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(QixiCapsuleButtonStyle())
-
-          Button {
-            model.completeOnboarding(enableICloud: enableICloud)
-          } label: {
-            Label(
-              enableICloud ? L10n.text(.onboardingEnableICloud) : L10n.text(.onboardingContinue),
-              systemImage: enableICloud ? "icloud.and.arrow.up" : "arrow.right"
-            )
+        Button {
+          model.completeOnboarding()
+        } label: {
+          Label(L10n.text(.onboardingContinue), systemImage: "arrow.right")
             .labelStyle(.titleAndIcon)
             .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(QixiCapsuleButtonStyle(isSelected: true))
         }
+        .buttonStyle(QixiCapsuleButtonStyle(isSelected: true))
       }
       .padding(22)
       .frame(maxWidth: 520)
@@ -228,13 +232,16 @@ struct HermesStatusBadge: View {
       Text(status.title)
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(status.color)
-        .contentTransition(.numericText())
+        .contentTransition(.identity)
     }
     .padding(.vertical, 7)
     .padding(.horizontal, 10)
     .background(QixiColor.controlSurface, in: Capsule(style: .continuous))
     .overlay(Capsule(style: .continuous).stroke(QixiColor.separator, lineWidth: 0.8))
     .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("hermes-status-badge")
+    .accessibilityValue(status.title)
+    .animation(nil, value: status.title)
   }
 }
 
@@ -278,8 +285,7 @@ struct BoardControlStrip: View {
       Button {
         model.passMove()
       } label: {
-        Label(L10n.text(.boardPass), systemImage: "hand.raised")
-          .labelStyle(.titleAndIcon)
+        Text(L10n.text(.boardPass))
       }
       .buttonStyle(QixiCapsuleButtonStyle())
 
