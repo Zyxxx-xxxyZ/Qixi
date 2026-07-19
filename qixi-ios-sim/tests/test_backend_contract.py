@@ -565,11 +565,14 @@ class BackendContractTests(unittest.TestCase):
       self.assertEqual(qixi_backend.DEFAULT_KATAGO_BIN, qixi_backend.DEFAULT_METAL_KATAGO_BIN)
 
   def test_default_project_models_are_discovered(self) -> None:
+    # b6 ships as a KataGo upstream test net (present after submodule checkout).
     self.assertTrue(qixi_backend.DEFAULT_B6_MODEL.exists())
-    self.assertTrue(qixi_backend.DEFAULT_B18_MODEL.exists())
-    self.assertTrue(qixi_backend.DEFAULT_B28_MODEL.exists())
+    # b18/b28 are large local nets (gitignored); only path wiring is required for CI.
+    self.assertEqual(qixi_backend.DEFAULT_B18_MODEL.name, "b18nbt.bin")
+    self.assertEqual(qixi_backend.DEFAULT_B28_MODEL.name, "b28nbt.bin")
     self.assertEqual(qixi_backend.ENGINE_MODEL_DEFAULTS["b18nbt"], qixi_backend.DEFAULT_B18_MODEL)
     self.assertEqual(qixi_backend.ENGINE_MODEL_DEFAULTS["b28nbt"], qixi_backend.DEFAULT_B28_MODEL)
+    self.assertEqual(qixi_backend.ENGINE_MODEL_DEFAULTS["b6"], qixi_backend.DEFAULT_B6_MODEL)
 
   def test_position_keys_include_model_identity(self) -> None:
     history = [{"color": "B", "x": 3, "y": 3}]
