@@ -402,6 +402,9 @@ MCTSStore MCTSStore::create(
   store.key.rulesHash = hashRules(store.storeRules);
   store.key.komiKey = komiToKey(store.storeRules.komi);
   store.key.wideRootNoiseKey = wideRootNoiseToKey(store.params.rootNoise);
+  store.key.playoutDoublingAdvantageKey =
+    playoutDoublingAdvantageToKey(store.params.playoutDoublingAdvantage);
+  store.params.searchForPla = initialBoard.nextPla;
   store.root = store.createInitialNode();
   store.rootBoardPtr = store.boardCacheFor(store.root);
   if(!store.rootBoardPtr)
@@ -442,6 +445,13 @@ void MCTSStore::rekeyModelId(ModelId modelId) {
 
 void MCTSStore::setEvaluator(Evaluator* value) {
   evaluator = value;
+  if(evaluator) {
+    evaluator->setPlayoutDoublingAdvantage(
+      params.playoutDoublingAdvantage,
+      params.playoutDoublingAdvantagePla,
+      params.searchForPla
+    );
+  }
 }
 
 bool MCTSStore::setTreeSelectionMode(
@@ -626,6 +636,14 @@ bool MCTSStore::switchRoot(NodeId node, std::string* error) {
   root = node;
   rootBoardPtr = std::move(cached);
   rootSessionSeq += 1;
+  params.searchForPla = rootBoardPtr->nextPla;
+  if(evaluator) {
+    evaluator->setPlayoutDoublingAdvantage(
+      params.playoutDoublingAdvantage,
+      params.playoutDoublingAdvantagePla,
+      params.searchForPla
+    );
+  }
   // Checkpoint/validate require the current root to be visible. Search leaves many
   // nodes invisible; without this, autosave/OOM unload fail after a root switch.
   markVisible(node, true);
@@ -899,51 +917,77 @@ bool MCTSStore::selectPathToLeaf(ThreadState& state, Path& path, NodeId& leaf) {
   }
 }
 
-//ActionId MCTSStore::selectActionByNnPolicyOnly(NodeId parentId) {
-//  // TEST-ONLY path: sample a legal child proportional to the stored NN prior.
-//  // Visit counts, Q-values, FPU, and root noise are intentionally ignored so
-//  // prior MCTS traffic through a node cannot bias successor choice.
-//  const Node& parent = nodes[parentId];
-//  if(parent.policyOffset == kInvalidNode ||
-//     static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())
-//    return kInvalidAction;
-//
-//  float priorSum = 0.0f;
-//  for(Move move = 0; move < kMoveCount; ++move) {
-//    const float prior = policyArena[parent.policyOffset + move];
-//    if(prior > 0.0f)
-//      priorSum += prior;
-//  }
-//  if(priorSum <= 0.0f)
-//    return kInvalidAction;
-//
-//  // Deterministic unit draw from store seed, playout index, and parent id so
-//  // two engines with the same NN priors and seed follow the same trajectory
-//  // regardless of visit statistics.
-//  const uint64_t keyValue = params.seed ^
-//    (playoutSeq * 0x9e3779b97f4a7c15ULL) ^
-//    (static_cast<uint64_t>(parentId) * 0xbf58476d1ce4e5b9ULL) ^
-//    0x504f4c594f4e4c59ULL; // "POLYONLY"
-//  const double u = deterministicUnit(keyValue) * static_cast<double>(priorSum);
-//  double cumulative = 0.0;
-//  Move chosen = kMovePass;
-//  bool found = false;
-//  for(Move move = 0; move < kMoveCount; ++move) {
-//    const float prior = policyArena[parent.policyOffset + move];
-//    if(prior <= 0.0f)
-//      continue;
-//    cumulative += static_cast<double>(prior);
-//    if(!found || u <= cumulative) {
-//      chosen = move;
-//      found = true;
-//      if(u <= cumulative)
-//        break;
-//    }
-//  }
-//  if(!found)
-//    return kInvalidAction;
-//  return getOrCreateAction(parentId, chosen);
-//}
+ActionId MCTSStore::selectActionByNnPolicyOnly(NodeId parentId) {
+  // TEST-ONLY path: sample a legal child proportional to the stored NN prior.
+  // Visit counts, Q-values, FPU, and root noise are intentionally ignored so
+  // prior MCTS traffic through a node cannot bias successor choice.
+  const Node& parent = nodes[parentId];
+  if(parent.policyOffset == kInvalidNode ||
+     static_cast<uint64_t>(parent.policyOffset) + kMoveCount > policyArena.size())
+    return kInvalidAction;
+
+  float priorSum = 0.0f;
+  for(Move move = 0; move < kMoveCount; ++move) {
+    const float prior = policyArena[parent.policyOffset + move];
+    if(prior > 0.0f)
+      priorSum += prior;
+  }
+  if(priorSum <= 0.0f)
+    return kInvalidAction;
+
+  // Deterministic unit draw from store seed, playout index, and parent id so
+  // two engines with the same NN priors and seed follow the same trajectory
+  // regardless of visit statistics.
+  const uint64_t keyValue = params.seed ^
+    (playoutSeq * 0x9e3779b97f4a7c15ULL) ^
+    (static_cast<uint64_t>(parentId) * 0xbf58476d1ce4e5b9ULL) ^
+    0x504f4c594f4e4c59ULL; // "POLYONLY"
+  const double u = deterministicUnit(keyValue) * static_cast<double>(priorSum);
+  double cumulative = 0.0;
+  Move chosen = kMovePass;
+  bool found = false;
+  for(Move move = 0; move < kMoveCount; ++move) {
+    const float prior = policyArena[parent.policyOffset + move];
+    if(prior <= 0.0f)
+      continue;
+    cumulative += static_cast<double>(prior);
+    if(!found || u <= cumulative) {
+      chosen = move;
+      found = true;
+      if(u <= cumulative)
+        break;
+    }
+  }
+  if(!found)
+    return kInvalidAction;
+  return getOrCreateAction(parentId, chosen);
+}
+
+namespace {
+
+// Official TOTALCHILDWEIGHT_PUCT_OFFSET
+constexpr float kPuctChildWeightOffset = 0.01f;
+
+float edgeWeight(const Action& action) {
+  // Edge-local only — never scale by child node visits (child may have been root).
+  if(action.stats.weightSum > 0.0f && std::isfinite(action.stats.weightSum))
+    return action.stats.weightSum;
+  return static_cast<float>(action.visits);
+}
+
+float cpuctExplorationTerm(float totalChildWeight, const SearchParams& params) {
+  const float base = std::max(1.0f, params.cpuctExplorationBase);
+  const float w = std::max(0.0f, totalChildWeight);
+  return params.cpuct +
+    params.cpuctExplorationLog * std::log((w + base) / base);
+}
+
+float exploreScaling(float totalChildWeight, const SearchParams& params) {
+  const float w = std::max(0.0f, totalChildWeight);
+  return cpuctExplorationTerm(w, params) * std::sqrt(w + kPuctChildWeightOffset);
+}
+
+} // namespace
 
 ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
   if(treeSelectionMode_ == TreeSelectionMode::testNnPolicyOnly) {
@@ -972,17 +1016,48 @@ ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
     current = actions[current].nextAction;
     traversed += 1;
   }
-  float bestScore = -1.0e30f;
-  Move bestMove = kMovePass;
-  ActionId bestActionId = kInvalidAction;
-  bool found = false;
+
+  // Precompute edge-local W and policy mass of tried edges (Contract A).
+  float totalChildWeight = 0.0f;
+  float policyProbMassVisited = 0.0f;
   for(Move move = 0; move < kMoveCount; ++move) {
     const float prior = policyArena[parent.policyOffset + move];
     if(prior < 0.0f)
       continue;
     const ActionId actionId = actionByMove[move];
-    const Action* action = actionId == kInvalidAction ? nullptr : &actions[actionId];
-    const float score = scoreAction(parent, move, prior, action, isRoot);
+    if(actionId == kInvalidAction || actionId >= actions.size())
+      continue;
+    const Action& action = actions[actionId];
+    if(action.visits == 0)
+      continue;
+    totalChildWeight += edgeWeight(action);
+    policyProbMassVisited += prior;
+  }
+  if(policyProbMassVisited > 1.0001f)
+    policyProbMassVisited = 1.0f;
+
+  const float scaling = exploreScaling(totalChildWeight, params);
+  const float fpu = fpuValueForChildren(parent, isRoot, policyProbMassVisited);
+
+  float bestScore = -1.0e30f;
+  Move bestMove = kMovePass;
+  ActionId bestActionId = kInvalidAction;
+  bool found = false;
+
+  // Phase 1: score all edge-tried actions.
+  for(Move move = 0; move < kMoveCount; ++move) {
+    float prior = policyArena[parent.policyOffset + move];
+    if(prior < 0.0f)
+      continue;
+    const ActionId actionId = actionByMove[move];
+    if(actionId == kInvalidAction || actionId >= actions.size())
+      continue;
+    const Action& action = actions[actionId];
+    if(action.visits == 0)
+      continue;
+    const float score = scoreActionEdge(
+      parent, move, prior, &action, /*edgeTried=*/true, scaling, fpu, isRoot
+    );
     if(!found || score > bestScore) {
       bestScore = score;
       bestMove = move;
@@ -990,6 +1065,39 @@ ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
       found = true;
     }
   }
+
+  // Phase 2: single best-policy untried legal move (official structure).
+  Move bestNewMove = kMovePass;
+  float bestNewPrior = -1.0f;
+  bool hasNew = false;
+  for(Move move = 0; move < kMoveCount; ++move) {
+    const float prior = policyArena[parent.policyOffset + move];
+    if(prior < 0.0f)
+      continue;
+    const ActionId actionId = actionByMove[move];
+    if(actionId != kInvalidAction && actionId < actions.size() && actions[actionId].visits > 0)
+      continue;
+    if(!hasNew || prior > bestNewPrior) {
+      bestNewPrior = prior;
+      bestNewMove = move;
+      hasNew = true;
+    }
+  }
+  if(hasNew) {
+    const ActionId actionId = actionByMove[bestNewMove];
+    const Action* action =
+      (actionId != kInvalidAction && actionId < actions.size()) ? &actions[actionId] : nullptr;
+    const float score = scoreActionEdge(
+      parent, bestNewMove, bestNewPrior, action, /*edgeTried=*/false, scaling, fpu, isRoot
+    );
+    if(!found || score > bestScore) {
+      bestScore = score;
+      bestMove = bestNewMove;
+      bestActionId = actionId;
+      found = true;
+    }
+  }
+
   if(!found)
     return kInvalidAction;
   return bestActionId != kInvalidAction
@@ -997,18 +1105,50 @@ ActionId MCTSStore::selectAction(NodeId parentId, bool isRoot) {
     : getOrCreateAction(parentId, bestMove);
 }
 
-float MCTSStore::scoreAction(
+float MCTSStore::fpuValueForChildren(
+  const Node& parent,
+  bool isRoot,
+  float policyProbMassVisited
+) const {
+  // Parent-relative FPU on the same utility scale as edge backups (white-centered utilityMean).
+  const float parentUtility = parent.visits > 0
+    ? parent.stats.utilityMean
+    : params.fpuValue;
+  const float fpuReductionMax = isRoot ? params.rootFpuReductionMax : params.fpuReductionMax;
+  const float reduction = fpuReductionMax * std::sqrt(std::max(0.0f, policyProbMassVisited));
+  // Official: white FPU = parent - reduction; black FPU = parent + reduction (worse for the player).
+  if(parent.nextPla == Color::white)
+    return parentUtility - reduction;
+  if(parent.nextPla == Color::black)
+    return parentUtility + reduction;
+  return parentUtility - reduction;
+}
+
+float MCTSStore::scoreActionEdge(
   const Node& parent,
   Move move,
   float prior,
   const Action* action,
+  bool edgeTried,
+  float exploreScalingValue,
+  float fpuValue,
   bool isRoot
 ) const {
-  float q = action != nullptr && action->visits > 0
-    ? valueForSelection(action->stats, parent.nextPla)
-    : params.fpuValue;
-  if(isRoot && params.rootNoise > 0.0f && prior >= 0.0f) {
-    prior = std::pow(prior, 1.0f / (4.0f * params.rootNoise + 1.0f));
+  (void)move;
+  if(prior < 0.0f)
+    return -1.0e30f;
+
+  float childUtility = fpuValue;
+  float childWeight = 0.0f;
+  if(edgeTried && action != nullptr && action->visits > 0) {
+    // Edge-local Q only (Contract A) — never child node utility.
+    childUtility = action->stats.utilityMean;
+    childWeight = edgeWeight(*action);
+  }
+
+  float nnPolicyProb = prior;
+  if(isRoot && params.rootNoise > 0.0f && nnPolicyProb >= 0.0f) {
+    nnPolicyProb = std::pow(nnPolicyProb, 1.0f / (4.0f * params.rootNoise + 1.0f));
     const uint64_t keyValue = params.seed ^
       (rootSessionSeq * 0x9e3779b97f4a7c15ULL) ^
       (playoutSeq * 0xbf58476d1ce4e5b9ULL) ^
@@ -1018,13 +1158,51 @@ float MCTSStore::scoreAction(
     const float gaussianMagnitude = static_cast<float>(
       std::fabs(std::sqrt(-2.0 * std::log(u1)) * std::cos(6.28318530717958647692 * u2))
     );
-    if((mixDeterministic(keyValue ^ 0x517869ULL) & 1ULL) != 0)
-      q += params.rootNoise * gaussianMagnitude;
+    if((mixDeterministic(keyValue ^ 0x517869ULL) & 1ULL) != 0) {
+      if(parent.nextPla == Color::white)
+        childUtility += params.rootNoise * gaussianMagnitude;
+      else
+        childUtility -= params.rootNoise * gaussianMagnitude;
+    }
   }
-  const float parentVisits = static_cast<float>(std::max<uint64_t>(1, parent.visits));
-  const float actionVisits = action == nullptr ? 0.0f : static_cast<float>(action->visits);
-  const float u = params.cpuct * prior * std::sqrt(parentVisits) / (1.0f + actionVisits);
-  return q + u;
+
+  const float exploreComponent =
+    exploreScalingValue * nnPolicyProb / (1.0f + childWeight);
+  const float valueComponent = valueForSelectionUtility(childUtility, parent.nextPla);
+  return exploreComponent + valueComponent;
+}
+
+float MCTSStore::scoreAction(
+  const Node& parent,
+  Move move,
+  float prior,
+  const Action* action,
+  bool isRoot
+) const {
+  // Compatibility entry: recompute scaling/FPU for a single edge (tests / call sites).
+  float totalChildWeight = 0.0f;
+  float policyMass = 0.0f;
+  ActionId current = parent.firstAction;
+  uint32_t traversed = 0;
+  while(current != kInvalidAction && traversed < parent.actionCount) {
+    if(current >= actions.size())
+      break;
+    const Action& a = actions[current];
+    if(a.visits > 0) {
+      totalChildWeight += edgeWeight(a);
+      const float p = policyPrior(parent, a.move);
+      if(p >= 0.0f)
+        policyMass += p;
+    }
+    current = a.nextAction;
+    traversed += 1;
+  }
+  if(policyMass > 1.0001f)
+    policyMass = 1.0f;
+  const float scaling = exploreScaling(totalChildWeight, params);
+  const float fpu = fpuValueForChildren(parent, isRoot, policyMass);
+  const bool edgeTried = action != nullptr && action->visits > 0;
+  return scoreActionEdge(parent, move, prior, action, edgeTried, scaling, fpu, isRoot);
 }
 
 float MCTSStore::policyPrior(const Node& parent, Move move) const {
@@ -1035,12 +1213,15 @@ float MCTSStore::policyPrior(const Node& parent, Move move) const {
 }
 
 float MCTSStore::valueForSelection(const ScalarStats& stats, Color pla) const {
-  const float white = stats.utilityMean;
+  return valueForSelectionUtility(stats.utilityMean, pla);
+}
+
+float MCTSStore::valueForSelectionUtility(float utilityWhite, Color pla) const {
   if(pla == Color::white)
-    return white;
+    return utilityWhite;
   if(pla == Color::black)
-    return -white;
-  return white;
+    return -utilityWhite;
+  return utilityWhite;
 }
 
 bool MCTSStore::evaluateLeaf(
@@ -1257,9 +1438,15 @@ float MCTSStore::displayWinrate(const ScalarStats& stats, Color pla) const {
 }
 
 float MCTSStore::displayScoreMean(const ScalarStats& stats, Color pla) const {
+  // Match official KataGo analysis JSON: user-facing "scoreMean" / "scoreLead" is the
+  // lead head (whiteLead), not scoreSelfplay (whiteScoreMean). Selfplay score is often
+  // roughly 2× lead on empty boards and is biased for display (see searchresults.cpp:
+  // moveInfo["scoreMean"] = lead; moveInfo["scoreSelfplay"] = scoreMean).
+  // Utility/PUCT still train on scoreMeanWhite via ScoreValue; only HUD/chart use lead.
+  const float whiteLead = stats.leadMeanWhite;
   if(pla == Color::black)
-    return -stats.scoreMeanWhite;
-  return stats.scoreMeanWhite;
+    return -whiteLead;
+  return whiteLead;
 }
 
 bool MCTSStore::qualityDeltaPercentForParentAction(
@@ -1784,15 +1971,23 @@ bool MCTSStore::validate(std::string* error) const {
   };
   if(!std::isfinite(storeRules.komi) ||
      !std::isfinite(params.cpuct) || params.cpuct < 0.0f ||
+     !std::isfinite(params.cpuctExplorationLog) || params.cpuctExplorationLog < 0.0f ||
+     !std::isfinite(params.cpuctExplorationBase) || params.cpuctExplorationBase <= 0.0f ||
+     !std::isfinite(params.fpuReductionMax) || params.fpuReductionMax < 0.0f ||
+     !std::isfinite(params.rootFpuReductionMax) || params.rootFpuReductionMax < 0.0f ||
      !std::isfinite(params.fpuValue) ||
      !std::isfinite(params.rootNoise) || params.rootNoise < 0.0f ||
      !std::isfinite(params.rootNoiseWeight) ||
      !std::isfinite(params.winLossUtilityFactor) ||
      !std::isfinite(params.staticScoreUtilityFactor) ||
-     !std::isfinite(params.dynamicScoreUtilityFactor))
+     !std::isfinite(params.dynamicScoreUtilityFactor) ||
+     !std::isfinite(params.playoutDoublingAdvantage) ||
+     params.playoutDoublingAdvantage < -3.0f || params.playoutDoublingAdvantage > 3.0f)
     return fail("persisted rules or search parameters are not finite and valid");
   if(key.rulesHash != hashRules(storeRules) || key.komiKey != komiToKey(storeRules.komi) ||
-     key.wideRootNoiseKey != wideRootNoiseToKey(params.rootNoise)) {
+     key.wideRootNoiseKey != wideRootNoiseToKey(params.rootNoise) ||
+     key.playoutDoublingAdvantageKey !=
+       playoutDoublingAdvantageToKey(params.playoutDoublingAdvantage)) {
     if(error) *error = "analysis key does not match persisted rules or search parameters";
     return false;
   }
@@ -2125,6 +2320,7 @@ std::vector<uint8_t> MCTSStore::serialize() const {
   w.writeU64(key.rulesHash);
   w.writeI32(key.komiKey);
   w.writeI32(key.wideRootNoiseKey);
+  w.writeI32(key.playoutDoublingAdvantageKey);
 
   w.writeU8(static_cast<uint8_t>(storeRules.koRule));
   w.writeU8(static_cast<uint8_t>(storeRules.scoringRule));
@@ -2142,6 +2338,13 @@ std::vector<uint8_t> MCTSStore::serialize() const {
   w.writeFloat(params.winLossUtilityFactor);
   w.writeFloat(params.staticScoreUtilityFactor);
   w.writeFloat(params.dynamicScoreUtilityFactor);
+  // v5 fields
+  w.writeFloat(params.cpuctExplorationLog);
+  w.writeFloat(params.cpuctExplorationBase);
+  w.writeFloat(params.fpuReductionMax);
+  w.writeFloat(params.rootFpuReductionMax);
+  w.writeFloat(params.playoutDoublingAdvantage);
+  w.writeU8(static_cast<uint8_t>(params.playoutDoublingAdvantagePla));
   w.writeU64(params.seed);
   w.writeU32(root);
   w.writeU64(playoutSeq);
@@ -2422,8 +2625,20 @@ std::optional<MCTSStore> MCTSStore::deserialize(
      !r.readU8(modelId) ||
      !r.readU64(store.key.rulesHash) ||
      !r.readI32(store.key.komiKey) ||
-     !r.readI32(store.key.wideRootNoiseKey) ||
-     !r.readU8(koRule) ||
+     !r.readI32(store.key.wideRootNoiseKey)) {
+    if(error) *error = "truncated header";
+    return std::nullopt;
+  }
+  // v5+: PDA key after wideRootNoiseKey.
+  if(version >= 5) {
+    if(!r.readI32(store.key.playoutDoublingAdvantageKey)) {
+      if(error) *error = "truncated header (pda key)";
+      return std::nullopt;
+    }
+  } else {
+    store.key.playoutDoublingAdvantageKey = 0;
+  }
+  if(!r.readU8(koRule) ||
      !r.readU8(scoringRule) ||
      !r.readU8(taxRule) ||
      !r.readU8(suicide) ||
@@ -2437,13 +2652,46 @@ std::optional<MCTSStore> MCTSStore::deserialize(
      !r.readFloat(store.params.rootNoiseWeight) ||
      !r.readFloat(store.params.winLossUtilityFactor) ||
      !r.readFloat(store.params.staticScoreUtilityFactor) ||
-     !r.readFloat(store.params.dynamicScoreUtilityFactor) ||
-     !r.readU64(store.params.seed) ||
-     !r.readU32(store.root) ||
-     !r.readU64(store.playoutSeq) ||
-     !r.readU64(store.rootSessionSeq)) {
+     !r.readFloat(store.params.dynamicScoreUtilityFactor)) {
     if(error) *error = "truncated header";
     return std::nullopt;
+  }
+  if(version >= 5) {
+    uint8_t pdaPla = 0;
+    if(!r.readFloat(store.params.cpuctExplorationLog) ||
+       !r.readFloat(store.params.cpuctExplorationBase) ||
+       !r.readFloat(store.params.fpuReductionMax) ||
+       !r.readFloat(store.params.rootFpuReductionMax) ||
+       !r.readFloat(store.params.playoutDoublingAdvantage) ||
+       !r.readU8(pdaPla) ||
+       !r.readU64(store.params.seed) ||
+       !r.readU32(store.root) ||
+       !r.readU64(store.playoutSeq) ||
+       !r.readU64(store.rootSessionSeq)) {
+      if(error) *error = "truncated header (v5 params)";
+      return std::nullopt;
+    }
+    if(pdaPla > static_cast<uint8_t>(Color::white)) {
+      if(error) *error = "invalid playoutDoublingAdvantagePla";
+      return std::nullopt;
+    }
+    store.params.playoutDoublingAdvantagePla = static_cast<Color>(pdaPla);
+  } else {
+    // Pre-v5: analysis-aligned PUCT defaults; PDA = 0; keep legacy cpuct as c_expl.
+    store.params.cpuctExplorationLog = 0.45f;
+    store.params.cpuctExplorationBase = 500.0f;
+    store.params.fpuReductionMax = 0.2f;
+    store.params.rootFpuReductionMax = 0.1f;
+    store.params.playoutDoublingAdvantage = 0.0f;
+    store.params.playoutDoublingAdvantagePla = Color::empty;
+    store.key.playoutDoublingAdvantageKey = 0;
+    if(!r.readU64(store.params.seed) ||
+       !r.readU32(store.root) ||
+       !r.readU64(store.playoutSeq) ||
+       !r.readU64(store.rootSessionSeq)) {
+      if(error) *error = "truncated header";
+      return std::nullopt;
+    }
   }
   if(modelId > static_cast<uint8_t>(ModelId::b28nbt) ||
      koRule > static_cast<uint8_t>(KoRule::situational) ||

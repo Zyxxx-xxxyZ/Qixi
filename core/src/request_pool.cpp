@@ -89,7 +89,8 @@ std::string keyString(const AnalysisKey& key) {
       << modelIdToString(key.modelId) << ":"
       << key.rulesHash << ":"
       << key.komiKey << ":"
-      << key.wideRootNoiseKey;
+      << key.wideRootNoiseKey << ":"
+      << key.playoutDoublingAdvantageKey;
   return out.str();
 }
 
@@ -478,13 +479,20 @@ bool hasStoreBundleMagic(const std::vector<uint8_t>& bytes) {
   return readUnsigned(bytes, bytes.size(), offset, 8, magic) && magic == kStoreBundleMagic;
 }
 
-AnalysisKey makeKey(GameId gameId, ModelId modelId, const Rules& rules, int32_t noiseKey) {
+AnalysisKey makeKey(
+  GameId gameId,
+  ModelId modelId,
+  const Rules& rules,
+  int32_t noiseKey,
+  int32_t pdaKey = 0
+) {
   AnalysisKey key;
   key.gameId = gameId;
   key.modelId = modelId;
   key.rulesHash = hashRules(rules);
   key.komiKey = komiToKey(rules.komi);
   key.wideRootNoiseKey = noiseKey;
+  key.playoutDoublingAdvantageKey = pdaKey;
   return key;
 }
 
@@ -502,7 +510,13 @@ uint64_t stableStringHash(const std::string& value) {
 BackendWorker::BackendWorker(ResultCallback cb) : callback(std::move(cb)) {
   ctx.params.seed = 0x517869ULL;
   Rules rules;
-  ctx.currentKey = makeKey(ctx.nextGameId++, ModelId::none, rules, wideRootNoiseToKey(ctx.params.rootNoise));
+  ctx.currentKey = makeKey(
+    ctx.nextGameId++,
+    ModelId::none,
+    rules,
+    wideRootNoiseToKey(ctx.params.rootNoise),
+    playoutDoublingAdvantageToKey(ctx.params.playoutDoublingAdvantage)
+  );
 }
 
 BackendWorker::~BackendWorker() {
@@ -947,6 +961,13 @@ void BackendWorker::drainForTests() {
 void BackendWorker::setEvaluator(Evaluator* evaluator) {
   std::lock_guard<std::mutex> lock(stateMutex);
   ctx.evaluator = evaluator;
+  if(ctx.evaluator) {
+    ctx.evaluator->setPlayoutDoublingAdvantage(
+      ctx.params.playoutDoublingAdvantage,
+      ctx.params.playoutDoublingAdvantagePla,
+      ctx.params.searchForPla
+    );
+  }
   if(ctx.store)
     ctx.store->setEvaluator(evaluator);
 }
@@ -1360,6 +1381,10 @@ BackendResult BackendWorker::executeRequest(const FrontendRequest& request) {
     case RequestKind::autosaveTick: return handleAutosaveTick(request, std::get<AutosaveTickRequest>(request.payload));
     case RequestKind::setKomi: return handleSetKomi(request, std::get<SetKomiRequest>(request.payload));
     case RequestKind::setWideRootNoise: return handleSetWideRootNoise(request, std::get<SetWideRootNoiseRequest>(request.payload));
+    case RequestKind::setPlayoutDoublingAdvantage:
+      return handleSetPlayoutDoublingAdvantage(
+        request, std::get<SetPlayoutDoublingAdvantageRequest>(request.payload)
+      );
     case RequestKind::newGame: return handleNewGame(request, std::get<NewGameRequest>(request.payload));
     case RequestKind::playMove: return handlePlayMove(request, std::get<PlayMoveRequest>(request.payload));
     case RequestKind::undo: return handleStep(request, std::get<StepRequest>(request.payload), false);
@@ -1397,7 +1422,13 @@ BackendResult BackendWorker::handleBoot(const FrontendRequest& request, const Bo
     else {
       Rules rules;
       BoardState board = BoardLogic::emptyBoard(Color::black);
-      ctx.currentKey = makeKey(ctx.currentKey.gameId, ModelId::none, rules, wideRootNoiseToKey(ctx.params.rootNoise));
+      ctx.currentKey = makeKey(
+        ctx.currentKey.gameId,
+        ModelId::none,
+        rules,
+        wideRootNoiseToKey(ctx.params.rootNoise),
+        playoutDoublingAdvantageToKey(ctx.params.playoutDoublingAdvantage)
+      );
       ctx.store = std::make_unique<MCTSStore>(MCTSStore::create(board, rules, ctx.currentKey, ctx.params));
     }
     ctx.store->setEvaluator(ctx.evaluator);
@@ -1819,6 +1850,56 @@ BackendResult BackendWorker::handleSetWideRootNoise(const FrontendRequest& reque
   return result;
 }
 
+BackendResult BackendWorker::handleSetPlayoutDoublingAdvantage(
+  const FrontendRequest& request,
+  const SetPlayoutDoublingAdvantageRequest& payload
+) {
+  if(!std::isfinite(payload.advantage) ||
+     payload.advantage < -3.0f || payload.advantage > 3.0f)
+    return baseResult(request, false, "playout doubling advantage is outside [-3, 3]");
+  if(payload.advantagePla != Color::empty &&
+     payload.advantagePla != Color::black &&
+     payload.advantagePla != Color::white)
+    return baseResult(request, false, "playout doubling advantage player is invalid");
+  auto result = baseResult(request, true, "playout doubling advantage changed");
+  if(!ensureStoreReady(result))
+    return result;
+  const int32_t newKey = playoutDoublingAdvantageToKey(payload.advantage);
+  if(ctx.currentKey.playoutDoublingAdvantageKey == newKey &&
+     ctx.params.playoutDoublingAdvantagePla == payload.advantagePla)
+    return baseResult(request, true, "playout doubling advantage unchanged");
+  std::string checkpointError;
+  (void)checkpointCurrentStore(checkpointError);
+  SearchParams targetParams = ctx.params;
+  targetParams.playoutDoublingAdvantage = payload.advantage;
+  targetParams.playoutDoublingAdvantagePla = payload.advantagePla;
+  AnalysisKey targetKey = ctx.currentKey;
+  targetKey.playoutDoublingAdvantageKey = newKey;
+  std::unique_ptr<MCTSStore> preparedStore;
+  std::string preparationError;
+  if(!prepareTargetStore(
+       targetKey, ctx.store->rules(), targetParams, preparedStore, preparationError
+     ))
+    return baseResult(
+      request, false, "could not prepare PDA-specific store: " + preparationError
+    );
+  ctx.store = std::move(preparedStore);
+  ctx.currentKey = targetKey;
+  ctx.params = ctx.store->searchParams();
+  if(ctx.evaluator) {
+    ctx.evaluator->setPlayoutDoublingAdvantage(
+      ctx.params.playoutDoublingAdvantage,
+      ctx.params.playoutDoublingAdvantagePla,
+      ctx.params.searchForPla
+    );
+  }
+  ctx.store->setEvaluator(ctx.evaluator);
+  bumpEpoch();
+  result = baseResult(request, true, "playout doubling advantage changed");
+  result.snapshot = ctx.store->snapshot();
+  return result;
+}
+
 BackendResult BackendWorker::handleNewGame(const FrontendRequest& request, const NewGameRequest& payload) {
   if(!std::isfinite(payload.rules.komi) || payload.rules.komi < kMinimumSupportedKomi ||
      payload.rules.komi > kMaximumSupportedKomi ||
@@ -1829,7 +1910,13 @@ BackendResult BackendWorker::handleNewGame(const FrontendRequest& request, const
   std::string checkpointError;
   (void)checkpointCurrentStore(checkpointError);
   const GameId gameId = ctx.nextGameId++;
-  ctx.currentKey = makeKey(gameId, ctx.currentKey.modelId, payload.rules, ctx.currentKey.wideRootNoiseKey);
+  ctx.currentKey = makeKey(
+    gameId,
+    ctx.currentKey.modelId,
+    payload.rules,
+    ctx.currentKey.wideRootNoiseKey,
+    ctx.currentKey.playoutDoublingAdvantageKey
+  );
   BoardState board = BoardLogic::emptyBoard(payload.nextPla);
   ctx.store = std::make_unique<MCTSStore>(MCTSStore::create(board, payload.rules, ctx.currentKey, ctx.params));
   ctx.store->setEvaluator(ctx.evaluator);
@@ -2146,7 +2233,13 @@ BackendResult BackendWorker::handleApplyRecognizedBoard(const FrontendRequest& r
   board.situationHashHistory.push_back(BoardLogic::situationHash(board));
   Rules rules = ctx.store ? ctx.store->rules() : Rules{};
   const GameId gameId = ctx.nextGameId++;
-  ctx.currentKey = makeKey(gameId, ctx.currentKey.modelId, rules, ctx.currentKey.wideRootNoiseKey);
+  ctx.currentKey = makeKey(
+    gameId,
+    ctx.currentKey.modelId,
+    rules,
+    ctx.currentKey.wideRootNoiseKey,
+    ctx.currentKey.playoutDoublingAdvantageKey
+  );
   ctx.store = std::make_unique<MCTSStore>(MCTSStore::create(board, rules, ctx.currentKey, ctx.params));
   ctx.store->setEvaluator(ctx.evaluator);
   ctx.committedIntentMap.clear();

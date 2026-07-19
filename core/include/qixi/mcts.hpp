@@ -93,13 +93,30 @@ struct Action {
 };
 
 struct SearchParams {
-  float cpuct = 1.1f;
+  /// KataGo-like c_expl (analysis default 1.0). Formerly a lone "cpuct" with default 1.1.
+  float cpuct = 1.0f;
+  /// Log term: c_expl + c_log * log((W + B) / B). Analysis default 0.45.
+  float cpuctExplorationLog = 0.45f;
+  /// Base B for log-cPUCT. Analysis default 500.
+  float cpuctExplorationBase = 500.0f;
+  /// Non-root FPU reduction max (official fpuReductionMax ≈ 0.2).
+  float fpuReductionMax = 0.2f;
+  /// Root FPU reduction max (analysis-ish ≈ 0.1).
+  float rootFpuReductionMax = 0.1f;
+  /// Legacy constant FPU; unused when parent-relative FPU is active (kept for serialize compat).
   float fpuValue = 0.0f;
+  /// Official wideRootNoise (UI: 宽根噪声). Root-only exploration breadth.
   float rootNoise = 0.0f;
   float rootNoiseWeight = 0.25f;
   float winLossUtilityFactor = 1.0f;
   float staticScoreUtilityFactor = 0.0f;
   float dynamicScoreUtilityFactor = 0.0f;
+  /// Official playoutDoublingAdvantage (UI: episode degree). NN strength bias; typically [-3, 3].
+  float playoutDoublingAdvantage = 0.0f;
+  /// Color that "owns" PDA; empty ⇒ use searchForPla (root side to move).
+  Color playoutDoublingAdvantagePla = Color::empty;
+  /// Runtime: who analysis is "for" when PDA pla is empty (updated on root switch). Not a store key.
+  Color searchForPla = Color::black;
   uint64_t seed = 0x517869ULL;
 };
 
@@ -201,6 +218,16 @@ public:
     bool isRoot,
     LeafPayload& output
   ) = 0;
+  /// Optional: sync official playoutDoublingAdvantage (episode degree) into the NN path.
+  virtual void setPlayoutDoublingAdvantage(
+    float advantage,
+    Color advantagePla,
+    Color searchForPla
+  ) {
+    (void)advantage;
+    (void)advantagePla;
+    (void)searchForPla;
+  }
 };
 
 class UniformEvaluator final : public Evaluator {
@@ -407,8 +434,20 @@ private:
   ActionId selectAction(NodeId parent, bool isRoot);
   ActionId selectActionByNnPolicyOnly(NodeId parent);
   float scoreAction(const Node& parent, Move move, float prior, const Action* action, bool isRoot) const;
+  float scoreActionEdge(
+    const Node& parent,
+    Move move,
+    float prior,
+    const Action* action,
+    bool edgeTried,
+    float exploreScalingValue,
+    float fpuValue,
+    bool isRoot
+  ) const;
+  float fpuValueForChildren(const Node& parent, bool isRoot, float policyProbMassVisited) const;
   float policyPrior(const Node& parent, Move move) const;
   float valueForSelection(const ScalarStats& stats, Color pla) const;
+  float valueForSelectionUtility(float utilityWhite, Color pla) const;
   bool evaluateLeaf(const ThreadState& state, NodeId leafNode, bool isRoot, LeafPayload& leaf);
   // priorMinVisitedRootDepth is the leaf's d_min *before* markVisitedByCurrentRoot.
   //   - never visited (∞): backup entire path leaf → current root

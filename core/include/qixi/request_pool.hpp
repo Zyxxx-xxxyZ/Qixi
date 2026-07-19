@@ -30,6 +30,7 @@ enum class RequestKind : uint8_t {
   autosaveTick,
   setKomi,
   setWideRootNoise,
+  setPlayoutDoublingAdvantage,
   newGame,
   playMove,
   undo,
@@ -56,6 +57,12 @@ struct EnterForegroundRequest {};
 struct AutosaveTickRequest { std::string reason; };
 struct SetKomiRequest { float komi = 7.5f; };
 struct SetWideRootNoiseRequest { float noise = 0.0f; };
+/// Episode degree = official playoutDoublingAdvantage; typically [-3, 3].
+struct SetPlayoutDoublingAdvantageRequest {
+  float advantage = 0.0f;
+  /// empty = use root side-to-move as the favored player.
+  Color advantagePla = Color::empty;
+};
 struct NewGameRequest { Rules rules; Color nextPla = Color::black; };
 struct PlayMoveRequest { Move move = kMovePass; UiIntentId uiIntentId = 0; RootRef parentRootRef = RootRef::nodeRef(0); };
 struct StepRequest { uint32_t steps = 1; };
@@ -80,6 +87,7 @@ using RequestPayload = std::variant<
   AutosaveTickRequest,
   SetKomiRequest,
   SetWideRootNoiseRequest,
+  SetPlayoutDoublingAdvantageRequest,
   NewGameRequest,
   PlayMoveRequest,
   StepRequest,
@@ -290,6 +298,10 @@ private:
   BackendResult handleAutosaveTick(const FrontendRequest& request, const AutosaveTickRequest& payload);
   BackendResult handleSetKomi(const FrontendRequest& request, const SetKomiRequest& payload);
   BackendResult handleSetWideRootNoise(const FrontendRequest& request, const SetWideRootNoiseRequest& payload);
+  BackendResult handleSetPlayoutDoublingAdvantage(
+    const FrontendRequest& request,
+    const SetPlayoutDoublingAdvantageRequest& payload
+  );
   BackendResult handleNewGame(const FrontendRequest& request, const NewGameRequest& payload);
   BackendResult handlePlayMove(const FrontendRequest& request, const PlayMoveRequest& payload);
   BackendResult handleStep(const FrontendRequest& request, const StepRequest& payload, bool forward);

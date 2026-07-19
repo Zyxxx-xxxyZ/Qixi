@@ -278,6 +278,8 @@ enum QixiCoreRequest: Encodable {
   case selectEngine(AnalysisEngine, expectedBackendEpoch: UInt64 = 0)
   case setKomi(Double, expectedBackendEpoch: UInt64 = 0)
   case setWideRootNoise(Double, expectedBackendEpoch: UInt64 = 0)
+  /// Official playoutDoublingAdvantage (UI: episode degree); typically in [-3, 3].
+  case setPlayoutDoublingAdvantage(Double, expectedBackendEpoch: UInt64 = 0)
   case newGame(komi: Double, nextPla: StoneColor, expectedBackendEpoch: UInt64 = 0)
   case playMove(move: Int, uiIntentId: UInt64, parentRoot: QixiCoreRootReference, expectedBackendEpoch: UInt64 = 0)
   case undo(steps: Int, expectedBackendEpoch: UInt64 = 0)
@@ -305,6 +307,8 @@ enum QixiCoreRequest: Encodable {
     case modelId
     case komi
     case noise
+    case advantage
+    case advantagePla
     case nextPla
     case move
     case uiIntentId
@@ -343,6 +347,11 @@ enum QixiCoreRequest: Encodable {
       try container.encode("setWideRootNoise", forKey: .kind)
       try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
       try payload.encode(noise, forKey: .noise)
+    case .setPlayoutDoublingAdvantage(let advantage, let expectedBackendEpoch):
+      try container.encode("setPlayoutDoublingAdvantage", forKey: .kind)
+      try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
+      try payload.encode(advantage, forKey: .advantage)
+      try payload.encode("empty", forKey: .advantagePla)
     case .newGame(let komi, let nextPla, let expectedBackendEpoch):
       try container.encode("newGame", forKey: .kind)
       try container.encode(expectedBackendEpoch, forKey: .expectedBackendEpoch)
@@ -415,6 +424,8 @@ extension QixiCoreRequest {
       return .setKomi(komi, expectedBackendEpoch: epoch)
     case .setWideRootNoise(let noise, _):
       return .setWideRootNoise(noise, expectedBackendEpoch: epoch)
+    case .setPlayoutDoublingAdvantage(let advantage, _):
+      return .setPlayoutDoublingAdvantage(advantage, expectedBackendEpoch: epoch)
     case .newGame(let komi, let nextPla, _):
       return .newGame(komi: komi, nextPla: nextPla, expectedBackendEpoch: epoch)
     case .playMove(let move, let uiIntentId, let parentRoot, _):

@@ -31,10 +31,15 @@ public:
     key.wideRootNoiseKey = core::wideRootNoiseToKey(0.0f);
 
     core::SearchParams params;
-    params.cpuct = 1.1f;
+    params.cpuct = 1.0f;
+    params.cpuctExplorationLog = 0.45f;
+    params.cpuctExplorationBase = 500.0f;
+    params.fpuReductionMax = 0.2f;
+    params.rootFpuReductionMax = 0.1f;
     params.fpuValue = 0.0f;
     params.rootNoise = 0.0f;
     params.rootNoiseWeight = 0.0f;
+    params.playoutDoublingAdvantage = 0.0f;
     params.winLossUtilityFactor = 1.0f;
     params.staticScoreUtilityFactor = 0.0f;
     params.dynamicScoreUtilityFactor = 0.0f;

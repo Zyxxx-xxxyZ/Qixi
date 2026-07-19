@@ -216,6 +216,23 @@ bool qixiBuildKataGoPositionFromCore(
 
 class LinkedCoreEvaluator final : public core::Evaluator {
 public:
+  void setPlayoutDoublingAdvantage(
+    float advantage,
+    core::Color advantagePla,
+    core::Color searchForPla
+  ) override {
+    episodePda = static_cast<double>(advantage);
+    auto toPlayer = [](core::Color c) -> Player {
+      if(c == core::Color::white) return P_WHITE;
+      if(c == core::Color::black) return P_BLACK;
+      return C_EMPTY;
+    };
+    episodePdaPla = toPlayer(advantagePla);
+    episodeSearchForPla = toPlayer(searchForPla);
+    if(episodeSearchForPla == C_EMPTY)
+      episodeSearchForPla = P_BLACK;
+  }
+
   void configure(NNEvaluator* value, const SearchParams* paramsValue) {
     nnEval = value;
     searchParams = paramsValue;
@@ -246,6 +263,20 @@ public:
     inputParams.nnPolicyTemperature = searchParams->nnPolicyTemperature;
     inputParams.policyOptimism = isRoot ? searchParams->rootPolicyOptimism : searchParams->policyOptimism;
     inputParams.maxHistory = core::kMaxNNHistory;
+    // Official playoutDoublingAdvantage (product: episode degree).
+    // Prefer core-synced PDA (episodePda); fall back to KataGo SearchParams.
+    const double pda =
+      std::isfinite(episodePda) ? episodePda : (searchParams ? searchParams->playoutDoublingAdvantage : 0.0);
+    if(pda != 0.0) {
+      Player favPla = episodePdaPla;
+      if(favPla == C_EMPTY && searchParams != nullptr)
+        favPla = searchParams->playoutDoublingAdvantagePla;
+      if(favPla == C_EMPTY)
+        favPla = episodeSearchForPla; // root side-to-move when unset
+      // Search::initNodeNNOutput: negate when evaluating the opponent of the favored player.
+      inputParams.playoutDoublingAdvantage =
+        (getOpp(nextPlayer) == favPla) ? -pda : pda;
+    }
     nnEval->evaluate(board, history, nextPlayer, inputParams, resultBuf, true, true);
     if(!resultBuf.hasResult || !resultBuf.result)
       return false;
@@ -294,6 +325,9 @@ private:
   NNEvaluator* nnEval = nullptr;
   const SearchParams* searchParams = nullptr;
   NNResultBuf resultBuf;
+  double episodePda = 0.0;
+  Player episodePdaPla = C_EMPTY;
+  Player episodeSearchForPla = P_BLACK;
 };
 
 class LinkedNativeKataGoEngine final : public NativeKataGoEngine {

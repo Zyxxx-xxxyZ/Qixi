@@ -1558,6 +1558,13 @@ struct SettingsStrip: View {
         range: QixiAnalysisLimits.minRootNoise...QixiAnalysisLimits.uiMaxRootNoise,
         allowsNegative: false
       ) { model.commitRootNoiseSetting($0) }
+      QixiDecimalSettingRow(
+        title: L10n.text(.settingsEpisodeDegree),
+        committedValue: model.playoutDoublingAdvantage,
+        fractionDigits: 2,
+        range: QixiAnalysisLimits.minPlayoutDoublingAdvantage...QixiAnalysisLimits.maxPlayoutDoublingAdvantage,
+        allowsNegative: true
+      ) { model.commitPlayoutDoublingAdvantageSetting($0) }
     }
     .padding(.vertical, 8)
   }

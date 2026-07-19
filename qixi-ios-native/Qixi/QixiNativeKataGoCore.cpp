@@ -858,6 +858,26 @@ NativeKataGoResult parseCoreFrontendRequestJSON(
     payload = body;
     return okResult("core request parsed");
   }
+  if(kindString == "setPlayoutDoublingAdvantage") {
+    double advantage = 0.0;
+    std::string advantagePla = "empty";
+    if(!hasPayload || !optionalNumberField(requestJSON, payloadStart, payloadEnd, "advantage", advantage))
+      return invalidRequestResult("Core setPlayoutDoublingAdvantage requires finite payload.advantage.");
+    (void)optionalStringField(requestJSON, payloadStart, payloadEnd, "advantagePla", advantagePla);
+    if(advantage < -3.0 || advantage > 3.0)
+      return invalidRequestResult("Core setPlayoutDoublingAdvantage advantage must be in [-3, 3].");
+    core::SetPlayoutDoublingAdvantageRequest body;
+    body.advantage = static_cast<float>(advantage);
+    if(advantagePla == "black" || advantagePla == "B")
+      body.advantagePla = core::Color::black;
+    else if(advantagePla == "white" || advantagePla == "W")
+      body.advantagePla = core::Color::white;
+    else
+      body.advantagePla = core::Color::empty;
+    kind = core::RequestKind::setPlayoutDoublingAdvantage;
+    payload = body;
+    return okResult("core request parsed");
+  }
   if(kindString == "newGame") {
     core::NewGameRequest body;
     double komi = body.rules.komi;

@@ -29,6 +29,17 @@ int32_t wideRootNoiseToKey(float noise) {
   ));
 }
 
+int32_t playoutDoublingAdvantageToKey(float pda) {
+  if(!std::isfinite(pda))
+    return 0;
+  const double scaled = std::round(static_cast<double>(pda) * 1000.0);
+  return static_cast<int32_t>(std::clamp(
+    scaled,
+    static_cast<double>(std::numeric_limits<int32_t>::min()),
+    static_cast<double>(std::numeric_limits<int32_t>::max())
+  ));
+}
+
 uint64_t hashRules(const Rules& rules) {
   uint64_t h = 1469598103934665603ULL;
   auto mix = [&](uint64_t v) {

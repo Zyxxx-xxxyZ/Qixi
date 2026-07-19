@@ -18,7 +18,8 @@ constexpr uint32_t kInvalidNode = std::numeric_limits<uint32_t>::max();
 constexpr uint32_t kInvalidAction = std::numeric_limits<uint32_t>::max();
 constexpr uint32_t kSearchThreadCount = 1;
 // v4: per-node minVisitedRootDepth + stored raw NN leaf (persistent visit semantics).
-constexpr uint32_t kPersistVersion = 4;
+// v5: edge-local PUCT params (log-cPUCT, FPU reductions) + playoutDoublingAdvantage key/fields.
+constexpr uint32_t kPersistVersion = 5;
 constexpr uint32_t kMinimumReadablePersistVersion = 2;
 // Sentinel: node has never been visited by any root under the min-depth criterion.
 constexpr uint32_t kNeverVisitedRootDepth = std::numeric_limits<uint32_t>::max();
@@ -114,13 +115,16 @@ struct AnalysisKey {
   uint64_t rulesHash = 0;
   int32_t komiKey = 7500;
   int32_t wideRootNoiseKey = 0;
+  /// Quantized playoutDoublingAdvantage (episode degree); see playoutDoublingAdvantageToKey.
+  int32_t playoutDoublingAdvantageKey = 0;
 
   bool operator==(const AnalysisKey& other) const {
     return gameId == other.gameId &&
       modelId == other.modelId &&
       rulesHash == other.rulesHash &&
       komiKey == other.komiKey &&
-      wideRootNoiseKey == other.wideRootNoiseKey;
+      wideRootNoiseKey == other.wideRootNoiseKey &&
+      playoutDoublingAdvantageKey == other.playoutDoublingAdvantageKey;
   }
 };
 
@@ -176,6 +180,8 @@ inline Point moveToPoint(Move move) {
 
 int32_t komiToKey(float komi);
 int32_t wideRootNoiseToKey(float noise);
+/// Quantize PDA (episode degree) for AnalysisKey; milli-units, range typically [-3, 3].
+int32_t playoutDoublingAdvantageToKey(float pda);
 uint64_t hashRules(const Rules& rules);
 std::string modelIdToString(ModelId modelId);
 ModelId modelIdFromString(const std::string& value);

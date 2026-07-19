@@ -109,6 +109,8 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
   // Analysis cache LRU cap lives on QixiAnalysisCache.
   private static let defaultKomi = QixiAnalysisLimits.defaultKomi
   private static let defaultRootNoise = QixiAnalysisLimits.defaultRootNoise
+  private static let defaultPlayoutDoublingAdvantage =
+    QixiAnalysisLimits.defaultPlayoutDoublingAdvantage
   private static let realtimeAnalysisInitialVisitBatch = 4
   private static let realtimeAnalysisMinimumVisitBatch = 1
   private static let realtimeAnalysisMaximumVisitBatch = 64
@@ -202,6 +204,31 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
     let next = QixiAnalysisLimits.normalizedRootNoise(clamped)
     guard abs(next - rootNoise) > 1e-12 else { return }
     rootNoise = next
+  }
+
+  /// Official playoutDoublingAdvantage (episode degree). Rekeys the core store when changed.
+  @Published var playoutDoublingAdvantage: Double = QixiViewModel.defaultPlayoutDoublingAdvantage {
+    didSet {
+      let normalized = QixiAnalysisLimits.normalizedPlayoutDoublingAdvantage(playoutDoublingAdvantage)
+      if normalized != playoutDoublingAdvantage {
+        playoutDoublingAdvantage = normalized
+        return
+      }
+      guard !isApplyingSnapshot else { return }
+      guard playoutDoublingAdvantage != oldValue else { return }
+      memoizedCurrentAnalysisCacheKey = nil
+      invalidateChartPointsCache()
+      persistence.saveSoon(reason: "playoutDoublingAdvantageChanged")
+      refreshVisibleAnalysisForCurrentSettings()
+      scheduleAnalysisRefresh(reason: "playoutDoublingAdvantageChanged")
+    }
+  }
+
+  func commitPlayoutDoublingAdvantageSetting(_ raw: Double) {
+    let rounded = Self.roundSetting(raw, fractionDigits: 2)
+    let next = QixiAnalysisLimits.normalizedPlayoutDoublingAdvantage(rounded)
+    guard abs(next - playoutDoublingAdvantage) > 1e-12 else { return }
+    playoutDoublingAdvantage = next
   }
 
   private static func roundSetting(_ value: Double, fractionDigits: Int) -> Double {
@@ -4594,6 +4621,11 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
         .setWideRootNoise(rootNoise, expectedBackendEpoch: 0),
         reason: "coreRootNoiseChanged"
       )
+    case "playoutDoublingAdvantageChanged":
+      submitCoreMutation(
+        .setPlayoutDoublingAdvantage(playoutDoublingAdvantage, expectedBackendEpoch: 0),
+        reason: "corePlayoutDoublingAdvantageChanged"
+      )
     default:
       break
     }
@@ -5161,6 +5193,7 @@ final class QixiViewModel: ObservableObject, QixiCoreMutationHost, QixiMemoryPre
       setupStones: setupStones,
       komi: komi,
       rootNoise: rootNoise,
+      playoutDoublingAdvantage: playoutDoublingAdvantage,
       // White-first / setup roots: empty history must not always key as Black-to-play.
       rootToMove: rootSideToMove
     )

@@ -89,6 +89,8 @@ enum L10n {
     case boardTerritory
     case settingsKomi
     case settingsWideRootNoise
+    /// Official playoutDoublingAdvantage (episode degree / 激进度).
+    case settingsEpisodeDegree
     case utilityNew
     case utilityCamera
     case utilityImport
@@ -219,6 +221,7 @@ enum L10n {
       .boardTerritory: "领地",
       .settingsKomi: "贴目",
       .settingsWideRootNoise: "宽根噪声",
+      .settingsEpisodeDegree: "激进度",
       .utilityNew: "新建",
       .utilityCamera: "拍照",
       .utilityImport: "打开",
@@ -345,6 +348,7 @@ enum L10n {
       .boardTerritory: "領地",
       .settingsKomi: "貼目",
       .settingsWideRootNoise: "寬根噪聲",
+      .settingsEpisodeDegree: "激進度",
       .utilityNew: "新建",
       .utilityCamera: "拍照",
       .utilityImport: "打開",
@@ -471,6 +475,7 @@ enum L10n {
       .boardTerritory: "Territory",
       .settingsKomi: "Komi",
       .settingsWideRootNoise: "Root Noise",
+      .settingsEpisodeDegree: "Episode Degree",
       .utilityNew: "New",
       .utilityCamera: "Camera",
       .utilityImport: "Open",

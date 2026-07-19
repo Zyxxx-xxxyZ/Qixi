@@ -99,6 +99,12 @@ add_executable(qixi_memory_pressure_relief
 
 target_link_libraries(qixi_memory_pressure_relief PRIVATE qixi_core)
 
+add_executable(qixi_edge_local_selection
+  tests/qixi_edge_local_selection.cpp
+)
+
+target_link_libraries(qixi_edge_local_selection PRIVATE qixi_core)
+
 enable_testing()
 add_test(NAME qixi_core_smoke COMMAND qixi_core_smoke)
 add_test(NAME qixi_core_invariants COMMAND qixi_core_invariants)
@@ -112,3 +118,4 @@ add_test(NAME qixi_policy_only_selection_prod_guard COMMAND qixi_policy_only_sel
 add_test(NAME qixi_stream_deserialize COMMAND qixi_stream_deserialize)
 add_test(NAME qixi_store_persist_strict COMMAND qixi_store_persist_strict)
 add_test(NAME qixi_memory_pressure_relief COMMAND qixi_memory_pressure_relief)
+add_test(NAME qixi_edge_local_selection COMMAND qixi_edge_local_selection)

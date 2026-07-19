@@ -13,6 +13,10 @@ enum QixiAnalysisLimits {
   static let defaultRootNoise = 0.04
   /// Soft upper bound for the main-page wide-root-noise number field.
   static let uiMaxRootNoise = 2.0
+  /// Official playoutDoublingAdvantage range (episode degree).
+  static let minPlayoutDoublingAdvantage = -3.0
+  static let maxPlayoutDoublingAdvantage = 3.0
+  static let defaultPlayoutDoublingAdvantage = 0.0
 
   static func isValidMaxVisits(_ value: Int) -> Bool {
     value >= minMaxVisits && value <= maxMaxVisits
@@ -26,6 +30,12 @@ enum QixiAnalysisLimits {
     value.isFinite && value >= minRootNoise
   }
 
+  static func isValidPlayoutDoublingAdvantage(_ value: Double) -> Bool {
+    value.isFinite &&
+      value >= minPlayoutDoublingAdvantage &&
+      value <= maxPlayoutDoublingAdvantage
+  }
+
   static func normalizedKomi(_ value: Double) -> Double {
     guard value.isFinite else { return defaultKomi }
     return min(max(value, minKomi), maxKomi)
@@ -34,6 +44,11 @@ enum QixiAnalysisLimits {
   static func normalizedRootNoise(_ value: Double) -> Double {
     guard value.isFinite else { return defaultRootNoise }
     return max(minRootNoise, value)
+  }
+
+  static func normalizedPlayoutDoublingAdvantage(_ value: Double) -> Double {
+    guard value.isFinite else { return defaultPlayoutDoublingAdvantage }
+    return min(max(value, minPlayoutDoublingAdvantage), maxPlayoutDoublingAdvantage)
   }
 }
 

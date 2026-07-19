@@ -9,10 +9,12 @@ enum QixiPositionIdentity {
     setupStones: [BoardSetupStone] = [],
     komi: Double,
     rootNoise: Double,
+    playoutDoublingAdvantage: Double = 0,
     rootToMove: StoneColor = .black
   ) -> String {
     let normalizedSetupStones = canonicalSetupStones(setupStones)
-    var key = "\(engine.rawValue)|rules:\(fixedRules)|komiBits:\(doubleBits(komi))|rootNoiseBits:\(doubleBits(rootNoise))|"
+    var key =
+      "\(engine.rawValue)|rules:\(fixedRules)|komiBits:\(doubleBits(komi))|rootNoiseBits:\(doubleBits(rootNoise))|pdaBits:\(doubleBits(playoutDoublingAdvantage))|"
     if !normalizedSetupStones.isEmpty {
       key.append("setup:")
       key.append(canonicalSetupText(normalizedSetupStones))
@@ -75,6 +77,7 @@ struct QixiAnalysisRequestIdentity: Equatable {
     setupStones: [BoardSetupStone] = [],
     komi: Double,
     rootNoise: Double,
+    playoutDoublingAdvantage: Double = 0,
     rootToMove: StoneColor = .black
   ) {
     self.engine = engine
@@ -84,6 +87,7 @@ struct QixiAnalysisRequestIdentity: Equatable {
       setupStones: setupStones,
       komi: komi,
       rootNoise: rootNoise,
+      playoutDoublingAdvantage: playoutDoublingAdvantage,
       rootToMove: rootToMove
     )
   }
@@ -94,6 +98,7 @@ struct QixiAnalysisRequestIdentity: Equatable {
     setupStones: [BoardSetupStone] = [],
     komi: Double,
     rootNoise: Double,
+    playoutDoublingAdvantage: Double = 0,
     rootToMove: StoneColor = .black
   ) -> Bool {
     self == QixiAnalysisRequestIdentity(
@@ -102,6 +107,7 @@ struct QixiAnalysisRequestIdentity: Equatable {
       setupStones: setupStones,
       komi: komi,
       rootNoise: rootNoise,
+      playoutDoublingAdvantage: playoutDoublingAdvantage,
       rootToMove: rootToMove
     )
   }
