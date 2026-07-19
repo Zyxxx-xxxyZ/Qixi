@@ -1,3 +1,8 @@
+# Qixi native SwiftUI app
+
+This is the **product** iOS front end (`NativeRelease` + `core::MCTSStore` + linked KataGo NN).
+See root [`README.md`](../README.md) and [`docs/architecture.md`](../docs/architecture.md).
+
 # Qixi Native SwiftUI Frontend
 
 This is the native SwiftUI frontend for the local iPad/iPhone analysis app.
@@ -5,7 +10,7 @@ This is the native SwiftUI frontend for the local iPad/iPhone analysis app.
 ## Build
 
 ```sh
-cd /Users/zyx/Desktop/projects/Qixi
+cd "$(git rev-parse --show-toplevel)"
 xcodebuild -project qixi-ios-native/Qixi.xcodeproj -scheme Qixi -destination 'generic/platform=iOS Simulator' -configuration Debug -derivedDataPath /private/tmp/qixi-derived-sim CODE_SIGNING_ALLOWED=NO build
 ```
 
@@ -26,7 +31,7 @@ The full simulator, backend, and physical-device runbook lives at
 For interactive Mac-side inspection of the native SwiftUI app:
 
 ```sh
-cd /Users/zyx/Desktop/projects/Qixi
+cd "$(git rev-parse --show-toplevel)"
 qixi-ios-native/scripts/run-native-sim.sh
 ```
 

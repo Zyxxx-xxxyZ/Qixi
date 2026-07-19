@@ -1,3 +1,8 @@
+# Native KataGo NN integration
+
+> **Audience:** developers linking NativeRelease / NN adapters.  
+> Product search is `core::MCTSStore` only — see [`search-engine.md`](search-engine.md).
+
 # Native KataGo Integration
 
 This document records the production path for moving Qixi from the current

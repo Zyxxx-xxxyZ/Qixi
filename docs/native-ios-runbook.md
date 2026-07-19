@@ -1,3 +1,8 @@
+# Native iOS runbook
+
+> **Audience:** developers building/running the app. Do not put personal device UDIDs or team IDs in PRs.  
+> Product overview: root [`README.md`](../README.md). Architecture: [`architecture.md`](architecture.md).
+
 # Native iOS Runbook
 
 This runbook explains how to run Qixi as a native SwiftUI app on the iOS

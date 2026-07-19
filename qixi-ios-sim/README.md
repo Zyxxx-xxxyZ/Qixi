@@ -1,3 +1,8 @@
+# Qixi iOS simulator / Mac bridge (optional)
+
+> **Not the default product path.** The shipping app is `qixi-ios-native` with in-process `core::MCTSStore` + linked KataGo NN (`NativeRelease`).
+> This tree is for Mac-hosted HTTP bridge and web simulator development tooling.
+
 # Qixi iOS Local Analysis Simulator
 
 This directory is a lightweight iPad-shaped simulator for integrating the local
@@ -14,7 +19,7 @@ It provides:
 ## Run Locally
 
 ```sh
-cd /Users/zyx/Desktop/projects/Qixi
+cd $(git rev-parse --show-toplevel)
 python3 qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
 ```
 
@@ -39,7 +44,7 @@ To open it on a physical iPad, put the Mac and iPad on the same network and open
 Build KataGo first:
 
 ```sh
-cd /Users/zyx/Desktop/projects/Qixi/KataGo
+cd $(git rev-parse --show-toplevel)/KataGo
 /opt/homebrew/bin/cmake -G Ninja -S cpp -B cpp/build-metal-mux -DUSE_BACKEND=METAL -DCMAKE_BUILD_TYPE=Release -DNO_GIT_REVISION=1
 /opt/homebrew/bin/cmake --build cpp/build-metal-mux --target katago -j 6
 ```
@@ -48,19 +53,19 @@ The backend defaults to the real models in this checkout when these engines are
 selected:
 
 ```text
-b6     /Users/zyx/Desktop/projects/Qixi/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
-b18nbt /Users/zyx/Desktop/projects/Qixi/b18nbt.bin
-b28nbt /Users/zyx/Desktop/projects/Qixi/b28nbt.bin
+b6     $(git rev-parse --show-toplevel)/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
+b18nbt $(git rev-parse --show-toplevel)/b18nbt.bin
+b28nbt $(git rev-parse --show-toplevel)/b28nbt.bin
 ```
 
 To force a specific model and optional config:
 
 ```sh
-export QIXI_KATAGO_BIN=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/build-metal-mux/katago
-export QIXI_KATAGO_MODEL=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
-export QIXI_KATAGO_CONFIG=/Users/zyx/Desktop/projects/Qixi/KataGo/cpp/configs/analysis_example.cfg
-export QIXI_KATAGO_OVERRIDE="$(cat /Users/zyx/Desktop/projects/Qixi/qixi-ios-sim/configs/metal-mux.override)"
-python3 /Users/zyx/Desktop/projects/Qixi/qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
+export QIXI_KATAGO_BIN=$(git rev-parse --show-toplevel)/KataGo/cpp/build-metal-mux/katago
+export QIXI_KATAGO_MODEL=$(git rev-parse --show-toplevel)/KataGo/cpp/tests/models/g170-b6c96-s175395328-d26788732.bin.gz
+export QIXI_KATAGO_CONFIG=$(git rev-parse --show-toplevel)/KataGo/cpp/configs/analysis_example.cfg
+export QIXI_KATAGO_OVERRIDE="$(cat $(git rev-parse --show-toplevel)/qixi-ios-sim/configs/metal-mux.override)"
+python3 $(git rev-parse --show-toplevel)/qixi-ios-sim/backend/qixi_backend.py --host 0.0.0.0 --port 8765
 ```
 
 Optional per-engine overrides:

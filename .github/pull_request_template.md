@@ -1,5 +1,8 @@
 ## Summary
 
+Product docs: `README.md`, `docs/architecture.md`, `docs/search-engine.md`. Gates: `docs/pr-verification-matrix.md`, `docs/quality-gates.md`.
+
+
 - 
 
 ## Changed Surface

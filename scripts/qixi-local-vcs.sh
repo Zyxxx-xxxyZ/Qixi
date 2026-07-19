@@ -7,6 +7,7 @@
 #
 # Usage: scripts/qixi-local-vcs.sh <command> [args...]
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

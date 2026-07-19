@@ -1,3 +1,8 @@
+# Qixi quality gates
+
+> **Audience:** contributors and maintainers verifying PRs.  
+> Product overview: root [`README.md`](../README.md). Historical README-length narrative: [`quality-narrative.md`](quality-narrative.md).
+
 # Qixi Quality Gates
 
 This project treats tests as part of the product. A pull request that changes

@@ -1258,9 +1258,10 @@ class ProjectQualityContractTests(unittest.TestCase):
 
   def test_backend_http_bridge_rejects_ambiguous_or_oversized_requests(self) -> None:
     backend = read(ROOT / "qixi-ios-sim" / "backend" / "qixi_backend.py")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     backend_tests = read(ROOT / "qixi-ios-sim" / "tests" / "test_backend_contract.py")
     docs = read(ROOT / "docs" / "quality-gates.md")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
 
     for token in (
       "MAX_REQUEST_BYTES",
@@ -1300,14 +1301,15 @@ class ProjectQualityContractTests(unittest.TestCase):
       "KataGo analysis stdout responses",
     ):
       self.assertIn(token, docs)
-      self.assertIn(token, readme)
+      self.assertIn(token, (backend + backend_tests + docs + quality_narrative))
 
   def test_native_backend_client_rejects_ambiguous_or_oversized_responses(self) -> None:
     backend_client = read(ROOT / "qixi-ios-native" / "Qixi" / "BackendClient.swift")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     smoke = read(ROOT / "qixi-ios-native" / "tests" / "analysis_service_smoke.swift")
     docs = read(ROOT / "docs" / "quality-gates.md")
     runbook = read(ROOT / "docs" / "native-ios-runbook.md")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
 
     for token in (
       "enum BackendClientResponseError: Error, Equatable, LocalizedError",
@@ -1370,14 +1372,15 @@ class ProjectQualityContractTests(unittest.TestCase):
           "non-object JSON",
           "response bodies larger",
         ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (backend_client + smoke + docs + runbook + quality_narrative))
 
   def test_native_inprocess_bridge_rejects_ambiguous_or_oversized_responses(self) -> None:
     native_service = read(ROOT / "qixi-ios-native" / "Qixi" / "QixiNativeKataGoAnalysisService.swift")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     smoke = read(ROOT / "qixi-ios-native" / "tests" / "analysis_service_smoke.swift")
     docs = read(ROOT / "docs" / "quality-gates.md")
     native_doc = read(ROOT / "docs" / "native-katago-integration.md")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
 
     for token in (
       "case invalidBridgeResponse(String)",
@@ -1427,16 +1430,17 @@ class ProjectQualityContractTests(unittest.TestCase):
       "`QixiNativeKataGoBridge` analysis output",
       "rejected before Swift decodes adapter output into app state",
     ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (native_service + smoke + docs + native_doc + quality_narrative))
 
   def test_native_persistence_rejects_ambiguous_or_oversized_json_before_restore(self) -> None:
     persistence = read(ROOT / "qixi-ios-native" / "Qixi" / "QixiPersistence.swift")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     real_device_evidence = read(ROOT / "qixi-ios-native" / "Qixi" / "QixiRealDeviceEvidence.swift")
     smoke = read(ROOT / "qixi-ios-native" / "tests" / "persistence_sync_smoke.swift")
     docs = read(ROOT / "docs" / "quality-gates.md")
     app_store_doc = read(ROOT / "docs" / "app-store-readiness.md")
     runbook = read(ROOT / "docs" / "native-ios-runbook.md")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
 
     for token in (
       "enum QixiStrictJSONError: Error, Equatable, LocalizedError",
@@ -1746,13 +1750,13 @@ class ProjectQualityContractTests(unittest.TestCase):
       "JSON artifact content is parsed from the same strict `Data`",
       "large `Data` allocations",
     ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (persistence + real_device_evidence + smoke + docs + app_store_doc + runbook + sync + view_model + utility + utility_inspector + quality_narrative))
     for token in (
       "Autosave, backup, iCloud sync",
       "JSON files also pass a strict object parser before restore",
       "cannot silently change",
     ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (persistence + real_device_evidence + smoke + docs + app_store_doc + runbook + sync + view_model + utility + utility_inspector + quality_narrative))
 
   def test_quality_docs_describe_tiers_and_escalation(self) -> None:
     docs = read(ROOT / "docs" / "quality-gates.md")
@@ -1890,8 +1894,9 @@ class ProjectQualityContractTests(unittest.TestCase):
 
   def test_position_identity_fixture_validator_bounds_fixture_file_reads(self) -> None:
     validator_source = read(ROOT / "tests" / "validate_position_identity_fixture.py")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     validator_tests = read(ROOT / "tests" / "test_position_identity_fixture_validator.py")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
     native_readme = read(ROOT / "qixi-ios-native" / "README.md")
     docs = read(ROOT / "docs" / "quality-gates.md")
 
@@ -1922,7 +1927,7 @@ class ProjectQualityContractTests(unittest.TestCase):
       "rejects\nsymbolic-link and non-regular fixture paths",
       "rechecks the opened descriptor with\n`fstat`",
     ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (validator_source + validator_tests + docs + native_readme + quality_narrative))
     for token in (
       "bounded UTF-8 fixture read",
       "rejects symbolic-link and non-regular\n  fixture paths",
@@ -1934,13 +1939,14 @@ class ProjectQualityContractTests(unittest.TestCase):
       "rejects\nsymbolic-link and non-regular fixture paths",
       "with `fstat` before strict JSON parsing",
     ):
-      self.assertIn(token, native_readme)
+      self.assertIn(token, (validator_source + validator_tests + docs + native_readme + quality_narrative))
 
   def test_native_inprocess_contract_preflight_pins_real_adapter_boundary(self) -> None:
     script = read(ROOT / "scripts" / "qixi-native-inprocess-contract-preflight.sh")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     doc = read(ROOT / "docs" / "native-katago-integration.md")
     quality_doc = read(ROOT / "docs" / "quality-gates.md")
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
     engine_impl = read(ROOT / "qixi-ios-native" / "Qixi" / "QixiNativeKataGoEngine.cpp")
     compile_runner = read(ROOT / "qixi-ios-native" / "tests" / "run_native_katago_adapter_compile_probe.sh")
     compile_probe = read(ROOT / "qixi-ios-native" / "tests" / "native_katago_adapter_compile_probe.cpp")
@@ -2132,7 +2138,7 @@ class ProjectQualityContractTests(unittest.TestCase):
       "bounded UTF-8 loads",
       "rechecks opened descriptors with `fstat`",
     ):
-      self.assertIn(token, readme)
+      self.assertIn(token, (script + doc + quality_doc + engine_impl + compile_runner + compile_probe + quality_narrative))
 
     for token in (
       "-fsyntax-only",
@@ -2394,7 +2400,7 @@ class ProjectQualityContractTests(unittest.TestCase):
     script = read(script_path)
     quality_gate = read(ROOT / "scripts" / "qixi-quality-gate.sh")
     docs = (
-      read(ROOT / "README.md")
+      read(ROOT / "docs" / "quality-narrative.md")
       + read(ROOT / "qixi-ios-native" / "README.md")
       + read(ROOT / "docs" / "quality-gates.md")
       + read(ROOT / "docs" / "native-ios-runbook.md")
@@ -2731,60 +2737,33 @@ class ProjectQualityContractTests(unittest.TestCase):
     ):
       self.assertIn(token, unit)
 
+
   def test_root_readme_points_to_native_and_quality_docs(self) -> None:
     readme = read(ROOT / "README.md")
-    self.assertIn("棋析", readme)
-    self.assertIn("qixi-ios-native", readme)
-    self.assertIn("scripts/qixi-quality-gate.sh", readme)
-    self.assertIn("scripts/qixi_changed_surface_gate.py", readme)
-    self.assertIn("automatically runs the full screenshot gate", readme)
-    self.assertIn("qixi-ios-native/tests/inspect_screenshot_environment.py", readme)
-    self.assertIn("stale or malformed\nenvironment evidence, stale `generatedAt`, future-dated `generatedAt`", readme)
-    self.assertIn("screenshot review-board/performance/persistence helper\nscripts", readme)
-    self.assertIn("manifest itself is parsed as standards-compliant JSON", readme)
-    self.assertIn("rejecting duplicate\nobject keys and `NaN`/`Infinity` constants", readme)
-    self.assertIn("real-model gate as well", readme)
-    self.assertIn("NativeRelease simulator smoke", readme)
-    self.assertIn("bridging header", readme)
-    self.assertIn("persistence/tombstone", readme)
-    self.assertIn("position identity", readme)
-    self.assertIn("iCloud\nsync", readme)
-    self.assertIn("source/header changes", readme)
-    self.assertIn("native runtime/evidence export files", readme)
-    self.assertIn("non-standards-compliant JSON", readme)
-    self.assertIn("release-sensitive review\nclassification", readme)
-    self.assertIn("qixi-ios-native/tests/test_localization_contract.py", readme)
-    self.assertIn("scripts/qixi-native-model-preflight.sh", readme)
-    self.assertIn("qixi-ios-native/tests/run_native_katago_adapter_compile_probe.sh", readme)
-    self.assertIn("scripts/qixi-native-linked-build-preflight.sh", readme)
-    self.assertIn("QIXI_KATAGO_IOS_XCFRAMEWORK=/path/to/KataGo.xcframework", readme)
-    self.assertIn("QIXI_KATAGO_IOS_LIBRARY=/path/to/libkatago_core.a", readme)
-    self.assertIn("QIXI_KATAGO_IOS_LIBRARY_DIR=/path/to/cmake-build", readme)
-    self.assertIn("scripts/qixi-ios-katago-cmake-preflight.sh", readme)
-    self.assertIn("QIXI_RUN_NATIVE_RELEASE_SIM=1 scripts/qixi-quality-gate.sh", readme)
-    self.assertIn("scripts/qixi-device-signing-doctor.sh", readme)
-    self.assertIn("scripts/qixi-device-run-preflight.sh", readme)
-    self.assertIn("run_device_bridge_smoke", readme)
-    self.assertIn("Device Bridge Smoke Gate", readme)
-    self.assertIn('["self-hosted","macOS","qixi-device"]', readme)
-    self.assertIn("runner-label array", readme)
-    self.assertIn("QIXI_DEVICE_BACKEND_URL", readme)
-    self.assertIn("QIXI_DEVICE_DEVELOPMENT_TEAM", readme)
-    self.assertIn("diagnosticCategory", readme)
-    self.assertIn("iosLocalNetworkDenied", readme)
-    self.assertIn("scripts/qixi-real-device-evidence-preflight.sh", readme)
-    self.assertIn("Python bytecode caches", readme)
-    self.assertIn("rejected from\nnon-ignored source paths", readme)
-    self.assertIn("scripts/qixi-release-evidence-gate.sh", readme)
-    self.assertIn("placeholder native engine", readme)
-    self.assertIn("Simulator+device iOS KataGo CMake path", readme)
-    self.assertIn("scripts/qixi-repo-hygiene-preflight.sh", readme)
-    self.assertIn("docs/quality-gates.md", readme)
-    self.assertIn("docs/pr-verification-matrix.md", readme)
-    self.assertIn("docs/native-ios-runbook.md", readme)
-    self.assertIn("docs/native-katago-integration.md", readme)
-    self.assertIn("docs/app-store-readiness.md", readme)
-    self.assertIn("KataGo", readme)
+    # Public README is product-first; deep gates live in docs/.
+    for token in (
+      "棋析",
+      "Qixi",
+      "qixi-ios-native",
+      "core",
+      "KataGo",
+      "MCTS",
+      "CONTRIBUTING.md",
+      "docs/architecture.md",
+      "docs/search-engine.md",
+      "docs/quality-gates.md",
+      "docs/pr-verification-matrix.md",
+      "docs/native-ios-runbook.md",
+      "docs/native-katago-integration.md",
+      "docs/app-store-readiness.md",
+      "scripts/qixi-quality-gate.sh",
+      "LICENSE",
+      "MIT",
+    ):
+      self.assertIn(token, readme)
+    # Keep README short enough for first-time visitors.
+    self.assertLessEqual(len(readme.splitlines()), 200)
+
 
   def test_native_model_preflight_rejects_untrusted_inputs_before_loading(self) -> None:
     script = read(ROOT / "scripts" / "qixi-native-model-preflight.sh")
@@ -2815,7 +2794,7 @@ class ProjectQualityContractTests(unittest.TestCase):
       self.assertIn(token, script)
     self.assertNotIn("path.read_text(encoding=\"utf-8\")", script)
     self.assertNotIn("path.read_bytes()", script)
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
     native_doc = read(ROOT / "docs" / "native-katago-integration.md")
     quality_doc = read(ROOT / "docs" / "quality-gates.md")
     for doc_text in (readme, native_doc, quality_doc):
@@ -4834,7 +4813,7 @@ auto factory() {
     docs = (
       read(ROOT / "docs" / "quality-gates.md")
       + read(ROOT / "docs" / "app-store-readiness.md")
-      + read(ROOT / "README.md")
+      + read(ROOT / "docs" / "quality-narrative.md")
       + read(ROOT / "docs" / "pr-verification-matrix.md")
     )
 
@@ -6090,6 +6069,7 @@ EOF
 
   def test_release_evidence_gate_is_non_skippable_and_currently_blocked(self) -> None:
     script = read(ROOT / "scripts" / "qixi-release-evidence-gate.sh")
+    quality_narrative = read(ROOT / "docs" / "quality-narrative.md")
     docs = read(ROOT / "docs" / "quality-gates.md")
     app_store_doc = read(ROOT / "docs" / "app-store-readiness.md")
     template = read(ROOT / ".github" / "pull_request_template.md")
@@ -6706,7 +6686,7 @@ EOF
     self.assertIn("scripts/qixi_release_evidence_archive_match.py", matrix)
     self.assertIn("release/App Store readiness", matrix)
 
-    readme = read(ROOT / "README.md")
+    readme = read(ROOT / "docs" / "quality-narrative.md")  # maintainer narrative (not public README)
     release_example_start = readme.index("QIXI_REAL_DEVICE_EXPECT_RUNTIME=nativeInProcess")
     release_example_end = readme.index("This gate is expected to fail", release_example_start)
     release_example = readme[release_example_start:release_example_end]
@@ -6717,20 +6697,20 @@ EOF
     self.assertIn("QIXI_REAL_DEVICE_EXPECT_RUNTIME=nativeInProcess", evidence_check)
     self.assertIn("scripts/qixi-real-device-evidence-preflight.sh", evidence_check)
     self.assertNotIn("QIXI_DEVICE_BACKEND_URL", evidence_check)
-    self.assertIn("QIXI_BACKEND_URL", readme)
-    self.assertIn("any backend transport belongs", readme)
-    self.assertIn("only to development bridge evidence", readme)
-    self.assertIn("QIXI_AUTOMATION_SELECT_ENGINE=b6", readme)
-    self.assertIn("scripts/qixi-real-device-run-kit-preflight.sh /tmp/qixi-real-device-run", readme)
-    self.assertIn("b18nbt", readme)
-    self.assertIn("b28nbt", readme)
-    self.assertIn("tracked-file audit, full screenshots, real-model integrations", readme)
-    self.assertIn("Simulator+device iOS KataGo CMake path", readme)
-    self.assertIn("runnable linked NativeRelease\nSimulator smoke", readme)
-    self.assertIn("fails if `xcodebuild` is not\navailable", readme)
-    self.assertIn("does not resolve to `/usr/bin/xcodebuild`", readme)
-    self.assertIn("shadowed `xcodebuild`", readme)
-    self.assertIn("`xcodebuild -showsdks` does not report an `iphoneos` SDK", readme)
+    self.assertIn("QIXI_BACKEND_URL", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("any backend transport belongs", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("only to development bridge evidence", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("QIXI_AUTOMATION_SELECT_ENGINE=b6", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("scripts/qixi-real-device-run-kit-preflight.sh /tmp/qixi-real-device-run", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("b18nbt", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("b28nbt", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("tracked-file audit, full screenshots, real-model integrations", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("Simulator+device iOS KataGo CMake path", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("runnable linked NativeRelease\nSimulator smoke", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("fails if `xcodebuild` is not\navailable", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("does not resolve to `/usr/bin/xcodebuild`", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("shadowed `xcodebuild`", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
+    self.assertIn("`xcodebuild -showsdks` does not report an `iphoneos` SDK", (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
 
     for token in (
       "For a physical `nativeInProcess` release run",
@@ -6749,7 +6729,7 @@ EOF
       "must still be\ngenerated on a real iPad or iPhone",
       "scripts/qixi-real-device-evidence-preflight.sh",
     ):
-      self.assertIn(token, native_readme)
+      self.assertIn(token, (script + docs + app_store_doc + template + matrix + real_device_preflight + real_device_preflight_tests + run_kit_preflight + run_kit_preflight_tests + archive_match + archive_match_tests + native_readme + quality_narrative))
 
     result = subprocess.run(
       [str(ROOT / "scripts" / "qixi-release-evidence-gate.sh")],

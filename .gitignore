@@ -12,6 +12,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 analysis_logs/
+sgfs/
 qixi-ios-native/artifacts/
 qixi-ios-sim/artifacts/
 DerivedData/
@@ -35,10 +36,17 @@ build/
 KataGo/cpp/build-*/
 KataGo/cpp/tests/results/
 
-# Local build / oracle / IDE noise (keep source history clean for rollback)
+# Local build / oracle / IDE noise
+core/build*/
 core/build-rt/
 core/oracle/artifacts/
+qixi-ios-native/build/
 **/xcuserdata/
 *.o
 *.a
 *.d
+
+# Finder duplicate debris (never commit)
+* 2.*
+* 2
+**/* 2.*
